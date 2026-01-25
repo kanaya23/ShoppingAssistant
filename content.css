@@ -1,0 +1,162 @@
+/* ============================================
+   Shopee Shopping Assistant - Content Script Styles
+   Floating Action Button & Overlay Styles
+   ============================================ */
+
+/* Floating Action Button */
+.shopee-assistant-fab {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #EE4D2D 0%, #FF6B35 100%);
+  border: none;
+  cursor: pointer;
+  box-shadow:
+    0 4px 20px rgba(238, 77, 45, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.shopee-assistant-fab::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, transparent 50%);
+  border-radius: 50%;
+}
+
+.shopee-assistant-fab:hover {
+  transform: scale(1.1);
+  box-shadow:
+    0 6px 28px rgba(238, 77, 45, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.shopee-assistant-fab:active {
+  transform: scale(0.95);
+}
+
+.shopee-assistant-fab svg {
+  width: 28px;
+  height: 28px;
+  fill: white;
+  z-index: 1;
+}
+
+/* Pulse Animation */
+.shopee-assistant-fab::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #EE4D2D 0%, #FF6B35 100%);
+  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  z-index: -1;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+
+  50% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+/* Tooltip */
+.shopee-assistant-fab-tooltip {
+  position: fixed;
+  bottom: 42px;
+  left: 96px;
+  background: rgba(26, 26, 46, 0.95);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-8px);
+  transition: all 0.2s ease;
+  z-index: 999998;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.shopee-assistant-fab-tooltip::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent;
+  border-right-color: rgba(26, 26, 46, 0.95);
+}
+
+.shopee-assistant-fab:hover+.shopee-assistant-fab-tooltip {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Notification Badge */
+.shopee-assistant-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 18px;
+  height: 18px;
+  background: #10B981;
+  border-radius: 50%;
+  border: 2px solid white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  z-index: 2;
+}
+
+/* Iframe Sidebar */
+.shopee-assistant-iframe {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  /* Start hidden */
+  width: 400px;
+  height: 100vh;
+  border: none;
+  background: transparent;
+  z-index: 2147483647;
+  /* Max z-index */
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2);
+}
+
+.shopee-assistant-iframe.visible {
+  right: 0;
+}
+
+@media (max-width: 768px) {
+  .shopee-assistant-iframe {
+    width: 100%;
+    right: -100%;
+  }
+}

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopping Assistant</title>
+  <link rel="stylesheet" href="sidebar.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="assistant-container">
+    <!-- Header -->
+    <header class="assistant-header">
+      <div class="header-content">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" class="logo-icon">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
+            <path d="M12 15l1.57-3.43L17 10l-3.43-1.57L12 5l-1.57 3.43L7 10l3.43 1.57z" />
+          </svg>
+          <span class="logo-text">Shopping Assistant</span>
+        </div>
+        <div class="header-actions">
+          <button id="clear-btn" class="icon-btn" title="Clear conversation">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" title="Settings">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Chat Container -->
+    <main class="chat-container" id="chat-container">
+      <!-- Welcome Message -->
+      <div class="welcome-message" id="welcome-message">
+        <div class="welcome-icon">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+          </svg>
+        </div>
+        <h2>Welcome to Shopping Assistant</h2>
+        <p>I can help you find the best products on Shopee. Try asking:</p>
+        <div class="suggestions">
+          <button class="suggestion-chip" data-message="Find me the best screwdriver set under 100k">
+            🔧 Best screwdriver set under 100k
+          </button>
+          <button class="suggestion-chip" data-message="Compare wireless earbuds with good reviews">
+            🎧 Compare wireless earbuds
+          </button>
+          <button class="suggestion-chip" data-message="What are the top-rated phone cases?">
+            📱 Top-rated phone cases
+          </button>
+        </div>
+      </div>
+
+      <!-- Messages will be inserted here -->
+    </main>
+
+    <!-- Tool Status Bar -->
+    <div class="tool-status" id="tool-status">
+      <div class="tool-status-content">
+        <div class="spinner"></div>
+        <span id="tool-status-text">Processing...</span>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <footer class="input-area">
+      <div class="input-wrapper">
+        <textarea id="message-input" placeholder="Ask me to find products..." rows="1"></textarea>
+        <button id="send-btn" class="send-btn" disabled>
+          <svg viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+      </div>
+      <div class="input-hint">
+        <span>Press Enter to send, Shift+Enter for new line</span>
+      </div>
+    </footer>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button class="modal-close" id="modal-close">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="api-key-input">Gemini API Key</label>
+            <div class="api-key-wrapper">
+              <input type="password" id="api-key-input" placeholder="Enter your Gemini API key">
+              <button class="toggle-visibility" id="toggle-key">
+                <svg viewBox="0 0 24 24" class="eye-icon">
+                  <path
+                    d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                </svg>
+              </button>
+            </div>
+            <p class="form-hint">
+              Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>
+            </p>
+          </div>
+          <button id="save-api-key" class="btn-primary">Save API Key</button>
+        </div>
+        <div class="modal-footer">
+          <p class="version-info">Shopping Assistant v1.0.0</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Key Required Banner -->
+    <div class="api-key-banner" id="api-key-banner">
+      <div class="banner-content">
+        <svg viewBox="0 0 24 24" class="banner-icon">
+          <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+        </svg>
+        <span>API key required.</span>
+        <button id="open-settings-banner">Configure</button>
+      </div>
+    </div>
+
+    <!-- Test Mode Panel -->
+    <div class="test-panel" id="test-panel">
+      <div class="test-panel-header">
+        <h3>🧪 Test Mode</h3>
+        <button id="close-test-panel" class="icon-btn">✕</button>
+      </div>
+      <div class="test-panel-body">
+        <div class="test-section">
+          <h4>Search Shopee</h4>
+          <input type="text" id="test-search-keyword" placeholder="Enter keyword...">
+          <button id="test-search-btn" class="test-btn">Run Search</button>
+        </div>
+        <div class="test-section">
+          <h4>Scrape Listings</h4>
+          <input type="number" id="test-scrape-max" placeholder="Max items (default: 20)" value="20">
+          <button id="test-scrape-btn" class="test-btn">Scrape Current Page</button>
+        </div>
+        <div class="test-section">
+          <h4>Get Page Info</h4>
+          <button id="test-pageinfo-btn" class="test-btn">Get Current Page Info</button>
+        </div>
+        <div class="test-section">
+          <h4>Wait For Content</h4>
+          <button id="test-waitcontent-btn" class="test-btn">Check Content Loaded</button>
+        </div>
+        <div class="test-output">
+          <h4>Output:</h4>
+          <pre id="test-output-content">Results will appear here...</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Mode Toggle Button -->
+    <button id="test-mode-btn" class="test-mode-toggle" title="Toggle Test Mode">🧪</button>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+
+</html>
