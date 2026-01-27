@@ -117,7 +117,19 @@
               Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>
             </p>
           </div>
-          <button id="save-api-key" class="btn-primary">Save API Key</button>
+          <div class="form-group">
+            <label for="model-select">AI Model</label>
+            <select id="model-select" class="model-select">
+              <option value="gemini-3-pro-preview">Gemini 3 Pro (Most Intelligent)</option>
+              <option value="gemini-3-flash-preview">Gemini 3 Flash (Balanced)</option>
+              <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Fast & Smart)</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (Ultra Fast)</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro (Advanced Thinking)</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash (Legacy)</option>
+            </select>
+            <p class="form-hint">Select which Gemini model to use for responses</p>
+          </div>
+          <button id="save-api-key" class="btn-primary">Save Settings</button>
         </div>
         <div class="modal-footer">
           <p class="version-info">Shopping Assistant v1.0.0</p>
@@ -149,17 +161,26 @@
           <button id="test-search-btn" class="test-btn">Run Search</button>
         </div>
         <div class="test-section">
-          <h4>Scrape Listings</h4>
-          <input type="number" id="test-scrape-max" placeholder="Max items (default: 20)" value="20">
+          <h4>Scrape Listings (Main Page)</h4>
+          <input type="number" id="test-scrape-max" placeholder="Max items (default: 20)" value="5">
           <button id="test-scrape-btn" class="test-btn">Scrape Current Page</button>
+          <p style="font-size: 11px; color: #888; margin-top: 4px;">Returns basic info: Name, Price, Rating, Sold, URL
+          </p>
         </div>
         <div class="test-section">
-          <h4>Get Page Info</h4>
+          <h4>Deep Scrape URLs (Product Pages)</h4>
+          <textarea id="test-deep-urls" placeholder="Enter product URLs (one per line)..." rows="3"
+            style="width: 100%; resize: vertical; font-size: 12px; padding: 8px;"></textarea>
+          <button id="test-deep-scrape-btn" class="test-btn">Deep Scrape Selected URLs</button>
+          <p style="font-size: 11px; color: #888; margin-top: 4px;">Opens each URL in an ACTIVE tab, runs full V9
+            scraper (variations, description, reviews)</p>
+        </div>
+        <div class="test-section">
+          <h4>Debug Info</h4>
           <button id="test-pageinfo-btn" class="test-btn">Get Current Page Info</button>
-        </div>
-        <div class="test-section">
-          <h4>Wait For Content</h4>
           <button id="test-waitcontent-btn" class="test-btn">Check Content Loaded</button>
+          <p style="font-size: 11px; color: #888; margin-top: 4px;">These are for debugging page state, not used by AI
+          </p>
         </div>
         <div class="test-output">
           <h4>Output:</h4>

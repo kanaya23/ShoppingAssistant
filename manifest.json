@@ -20,6 +20,7 @@
   "background": {
     "scripts": [
       "lib/gemini.js",
+      "lib/deep-scrape-manager.js",
       "lib/tools.js",
       "background.js"
     ],
@@ -32,6 +33,7 @@
         "*://*.shopee.com/*"
       ],
       "js": [
+        "lib/deep-scraper.js",
         "content.js"
       ],
       "css": [

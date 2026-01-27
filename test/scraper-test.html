@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopee Scraper Test Harness</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            color: #ee4d2d;
+        }
+
+        .test-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #ee4d2d;
+            padding-bottom: 10px;
+        }
+
+        button {
+            background: #ee4d2d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 5px 5px 0;
+        }
+
+        button:hover {
+            background: #d0421a;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #6c757d;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        #results {
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .product-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
+        .product-card h3 {
+            margin: 0 0 10px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .product-price {
+            color: #ee4d2d;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .variation-list {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .review-sample {
+            background: #f1f3f5;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .deep-data {
+            border-left: 3px solid #ee4d2d;
+            padding-left: 10px;
+            margin-top: 10px;
+        }
+
+        .info-box {
+            background: #e7f5ff;
+            border: 1px solid #74c0fc;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🛒 Shopee Scraper Test Harness v2</h1>
+
+    <div class="info-box">
+        <strong>⚠️ Important:</strong> This test harness runs in isolation. Deep scraping (Phase 2) requires the 
+        actual browser extension context to open background tabs. Use this page to test Phase 1 (search results) 
+        and view expected data structures. For full testing, load the extension in Firefox.
+    </div>
+
+    <div class="test-section">
+        <h2>Phase 1: Search Results Scraper</h2>
+        <p>Scrapes product listings from the current search page (requires running on live Shopee).</p>
+
+        <button onclick="testPhase1Mock()">View Mock Phase 1 Data</button>
+        <button class="secondary" onclick="copyTestInstructions()">Copy Test Instructions</button>
+
+        <div id="phase1Status" class="status info">Ready to test</div>
+        <div id="phase1Results"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Phase 2: Deep Scraper (Per-Page)</h2>
+        <p>Opens background tabs to scrape variation prices, descriptions, and reviews.</p>
+
+        <div class="status warning">
+            ⚠️ Phase 2 requires the extension context to open background tabs. 
+            Cannot be tested from this standalone HTML file.
+        </div>
+
+        <button onclick="viewDeepScrapeData()">View Expected Data Structure</button>
+        <div id="phase2Results"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Full Output Preview</h2>
+        <p>See the final enriched data structure that the AI will receive.</p>
+
+        <button onclick="viewFullOutput()">View Full Output Structure</button>
+        <button class="secondary" onclick="copyOutput()">Copy JSON</button>
+
+        <div id="fullStatus" class="status info">Click button to view</div>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // Mock data representing Phase 1 output
+        const MOCK_PHASE1_DATA = [
+            {
+                name: "FEIBAO Obeng Set Isi 115 Pcs In 1 Driver Elektrik Magnetic",
+                basePrice: 38749,
+                url: "https://shopee.co.id/FEIBAO-Obeng-Set-Isi-115-i.1459628854.41916737107",
+                image: "https://down-id.img.susercontent.com/file/example.webp",
+                sold: "13 Terjual",
+                rating: 5,
+                index: 1
+            },
+            {
+                name: "Obeng Set Premium 24 in 1 Magnetic Screwdriver",
+                basePrice: 25000,
+                url: "https://shopee.co.id/Obeng-Set-Premium-i.12345.67890",
+                image: "https://down-id.img.susercontent.com/file/example2.webp",
+                sold: "1,2RB+ Terjual",
+                rating: 4.8,
+                index: 2
+            }
+        ];
+
+        // Mock data representing enriched output with deep scrape
+        const MOCK_ENRICHED_DATA = [
+            {
+                name: "FEIBAO Obeng Set Isi 115 Pcs In 1 Driver Elektrik Magnetic",
+                price: 38749,
+                rating: 5,
+                sold: "13 Terjual",
+                image: "https://down-id.img.susercontent.com/file/example.webp",
+                index: 1,
+                details: {
+                    url: "https://shopee.co.id/FEIBAO-Obeng-Set-Isi-115-i.1459628854.41916737107",
+                    variations: [
+                        { name: "115pcs Standard", price: "Rp38.749" },
+                        { name: "115pcs + Case Premium", price: "Rp52.000" },
+                        { name: "60pcs Mini Set", price: "Rp25.000" }
+                    ],
+                    description: "Spesifikasi Produk\nKategori: Obeng\nMerek: FEIBAO\n\nDeskripsi:\n- 115 mata obeng presisi\n- Magnetic tip\n- Anti-slip handle\n- Cocok untuk HP, laptop, jam, kacamata",
+                    reviewStats: {
+                        score: "4.9 dari 5",
+                        counts: { "5": "9,8RB", "4": "1,9RB", "3": "826", "2": "199", "1": "221" }
+                    },
+                    sampleReviews: {
+                        "5": [
+                            { author: "buyer123", text: "Bagus sekali! Lengkap dan presisi." },
+                            { author: "teknik_hp", text: "Sangat membantu untuk servis HP." }
+                        ],
+                        "4": [
+                            { author: "user456", text: "Lumayan, tapi case-nya agak tipis." }
+                        ],
+                        "1": [
+                            { author: "kecewa01", text: "Beberapa mata obeng berkarat." }
+                        ]
+                    }
+                }
+            }
+        ];
+
+        function updateStatus(elementId, message, type = 'info') {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = `status ${type}`;
+        }
+
+        function testPhase1Mock() {
+            updateStatus('phase1Status', '✅ Showing mock Phase 1 data (search results)', 'success');
+            
+            document.getElementById('phase1Results').innerHTML = MOCK_PHASE1_DATA.map((p, i) => `
+                <div class="product-card">
+                    <h3>${i + 1}. ${p.name}</h3>
+                    <div class="product-price">Rp ${(p.basePrice || 0).toLocaleString('id-ID')}</div>
+                    <div style="color: #666; font-size: 12px; margin-top: 5px;">
+                        Rating: ${p.rating || 'N/A'}★ | Sold: ${p.sold || 'N/A'}
+                    </div>
+                    <div style="color: #05a; font-size: 11px; margin-top: 5px; word-break: break-all;">
+                        ${p.url}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function copyTestInstructions() {
+            const instructions = `
+To test Phase 1 on a live Shopee page:
+
+1. Load the extension in Firefox (about:debugging → Load Temporary Add-on)
+2. Navigate to: https://shopee.co.id/search?keyword=obeng
+3. Open DevTools Console (F12)
+4. The content script will auto-inject
+
+To manually trigger scraping:
+- Use the sidebar chat and ask the AI to "scrape products on this page"
+            `.trim();
+            
+            navigator.clipboard.writeText(instructions);
+            alert('Instructions copied to clipboard!');
+        }
+
+        function viewDeepScrapeData() {
+            const details = MOCK_ENRICHED_DATA[0].details;
+            
+            document.getElementById('phase2Results').innerHTML = `
+                <div class="product-card">
+                    <h3>Deep Scrape Data Structure</h3>
+                    
+                    <div class="deep-data">
+                        <strong>💰 Variations (${details.variations.length}):</strong>
+                        <div class="variation-list">
+                            ${details.variations.map(v => `
+                                <div>• ${v.name}: <span class="product-price">${v.price}</span></div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="deep-data">
+                        <strong>📝 Description:</strong>
+                        <pre style="white-space: pre-wrap; font-size: 11px; background: #f8f9fa; padding: 10px; border-radius: 4px;">${details.description}</pre>
+                    </div>
+                    
+                    <div class="deep-data">
+                        <strong>📊 Review Statistics:</strong>
+                        <div>Score: ${details.reviewStats.score}</div>
+                        <div style="margin-top: 5px;">
+                            ${Object.entries(details.reviewStats.counts).map(([star, count]) => 
+                                `⭐${star}: ${count}`
+                            ).join(' | ')}
+                        </div>
+                    </div>
+                    
+                    <div class="deep-data">
+                        <strong>💬 Sample Reviews:</strong>
+                        ${Object.entries(details.sampleReviews).map(([star, reviews]) => `
+                            <div style="margin-top: 8px;"><strong>${star}★ Reviews:</strong></div>
+                            ${reviews.map(r => `
+                                <div class="review-sample">
+                                    <strong>${r.author}:</strong> ${r.text}
+                                </div>
+                            `).join('')}
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function viewFullOutput() {
+            updateStatus('fullStatus', '✅ Full enriched data structure (AI receives this)', 'success');
+            document.getElementById('results').textContent = JSON.stringify(MOCK_ENRICHED_DATA, null, 2);
+        }
+
+        function copyOutput() {
+            navigator.clipboard.writeText(JSON.stringify(MOCK_ENRICHED_DATA, null, 2));
+            alert('JSON copied to clipboard!');
+        }
+
+        // Log that the test harness is ready
+        console.log('Shopee Scraper Test Harness v2 loaded');
+        console.log('This is a standalone test page - deep scraping requires extension context');
+    </script>
+</body>
+
+</html>

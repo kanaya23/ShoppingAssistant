@@ -1,6 +1,7 @@
 /**
  * Shopee Shopping Assistant - Sidebar Script
  * Handles UI interactions and communication with background script
+ * Runs in a POPUP WINDOW (separate from the main page)
  */
 
 (function () {
@@ -28,29 +29,33 @@
     let port = null;
     let isStreaming = false;
     let currentStreamingMessage = null;
+    let tabId = null;
+
+    // Get tabId from URL query param
+    function getTabIdFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return parseInt(params.get('tabId'), 10) || null;
+    }
 
     // Connect to background script
     function connect() {
         try {
-            // Handle cross-browser compatibility
-            const runtime = (typeof browser !== 'undefined' ? browser : chrome).runtime;
-
-            port = runtime.connect({ name: 'sidebar' });
+            tabId = getTabIdFromUrl();
+            port = browser.runtime.connect({ name: 'sidebar' });
 
             port.onMessage.addListener(handleMessage);
 
             port.onDisconnect.addListener(() => {
-                console.log('Disconnected from background, reconnecting...');
+                console.log('Disconnected, reconnecting...');
                 port = null;
                 setTimeout(connect, 2000);
             });
 
-            // Init request - background will infer tabId from sender
-            port.postMessage({ action: 'init' });
+            // Init request with tabId
+            port.postMessage({ action: 'init', tabId });
 
         } catch (e) {
             console.error('Connection failed:', e);
-            port = null;
             setTimeout(connect, 2000);
         }
     }
@@ -82,17 +87,25 @@
                 break;
 
             case 'toolCall':
-                showToolStatus(`Using tool: ${formatToolName(message.name)}...`);
+                showToolStatus(`Using: ${formatToolName(message.name)}...`);
                 addToolBadge(message.name, 'executing');
                 break;
 
             case 'toolExecuting':
-                showToolStatus(`Executing: ${formatToolName(message.name)}...`);
+                showToolStatus(`Running: ${formatToolName(message.name)}...`);
+                break;
+
+            case 'toolProgress':
+                if (message.total > 0) {
+                    showToolStatus(`${formatToolName(message.name)}: ${message.current}/${message.total}...`);
+                    // Update badge title too if possible
+                    updateToolBadgeTitle(message.name, `${formatToolName(message.name)} (${message.current}/${message.total})`);
+                }
                 break;
 
             case 'toolResult':
                 updateToolBadge(message.name, 'complete');
-                showToolStatus(`Completed: ${formatToolName(message.name)}`);
+                showToolStatus(`Done: ${formatToolName(message.name)}`);
                 setTimeout(hideToolStatus, 1500);
                 break;
 
@@ -118,21 +131,43 @@
                 }
                 break;
 
+            case 'settingsSaved':
+                if (message.success) {
+                    hideApiKeyBanner();
+                    closeSettingsModal();
+                    showToast('Settings saved!', true);
+                } else {
+                    showToast('Failed to save: ' + (message.error || 'Unknown error'), false);
+                }
+                break;
+
             case 'apiKeySet':
                 if (message.success) {
                     hideApiKeyBanner();
                     closeSettingsModal();
-                    showToast('API key saved successfully!', true);
+                    showToast('Settings saved!', true);
                 } else {
-                    showToast('Failed to save API key: ' + (message.error || 'Unknown error'), false);
+                    showToast('Failed to save: ' + (message.error || 'Unknown error'), false);
+                }
+                break;
+
+            case 'currentModel':
+                // Set the dropdown to current model
+                const modelSelect = document.getElementById('model-select');
+                if (modelSelect && message.model) {
+                    modelSelect.value = message.model;
                 }
                 break;
 
             case 'testToolResult':
-                // Handle test mode results
                 const testOutput = document.getElementById('test-output-content');
                 if (testOutput) {
-                    testOutput.textContent = JSON.stringify(message.result, null, 2);
+                    // If result has a 'data' field that's a string (text report), show it directly
+                    if (message.result && typeof message.result.data === 'string') {
+                        testOutput.textContent = message.result.data;
+                    } else {
+                        testOutput.textContent = JSON.stringify(message.result, null, 2);
+                    }
                 }
                 break;
         }
@@ -164,13 +199,26 @@
 
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
 
+        // Create separate containers for text and tools
+        const textContent = document.createElement('div');
+        textContent.className = 'text-content';
+        textContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+        const toolContent = document.createElement('div');
+        toolContent.className = 'tool-content';
+
+        contentDiv.appendChild(textContent);
+        contentDiv.appendChild(toolContent);
         messageDiv.appendChild(contentDiv);
         chatContainer.appendChild(messageDiv);
         scrollToBottom();
 
-        currentStreamingMessage = { div: messageDiv, content: '' };
+        currentStreamingMessage = {
+            div: messageDiv,
+            content: '',
+            hasTools: false
+        };
     }
 
     // Append to streaming message
@@ -178,8 +226,10 @@
         if (!currentStreamingMessage) return;
 
         currentStreamingMessage.content += chunk;
-        const contentDiv = currentStreamingMessage.div.querySelector('.message-content');
-        contentDiv.innerHTML = formatMarkdown(currentStreamingMessage.content);
+        const textContent = currentStreamingMessage.div.querySelector('.text-content');
+        if (textContent) {
+            textContent.innerHTML = formatMarkdown(currentStreamingMessage.content);
+        }
         scrollToBottom();
     }
 
@@ -187,12 +237,21 @@
     function finalizeStreamingMessage() {
         if (!currentStreamingMessage) return;
 
-        const contentDiv = currentStreamingMessage.div.querySelector('.message-content');
+        const textContent = currentStreamingMessage.div.querySelector('.text-content');
+
         if (currentStreamingMessage.content) {
-            contentDiv.innerHTML = formatMarkdown(currentStreamingMessage.content);
+            if (textContent) textContent.innerHTML = formatMarkdown(currentStreamingMessage.content);
         } else {
-            // Remove empty message
-            currentStreamingMessage.div.remove();
+            // If no content, remove text container (unless it's the only thing, then maybe remove message?)
+            // If we have tools, keep message. If no tools and no content, remove message.
+            if (!currentStreamingMessage.hasTools) {
+                currentStreamingMessage.div.remove();
+            } else if (textContent) {
+                // Remove typing indicator if it's there
+                if (textContent.querySelector('.typing-indicator')) {
+                    textContent.remove();
+                }
+            }
         }
 
         currentStreamingMessage = null;
@@ -212,7 +271,15 @@
     `;
 
         if (currentStreamingMessage) {
-            currentStreamingMessage.div.querySelector('.message-content').appendChild(badge);
+            currentStreamingMessage.hasTools = true;
+            // Append to tool-content container
+            const toolContent = currentStreamingMessage.div.querySelector('.tool-content');
+            if (toolContent) {
+                toolContent.appendChild(badge);
+            } else {
+                // Fallback if structure is weird
+                currentStreamingMessage.div.querySelector('.message-content').appendChild(badge);
+            }
         } else {
             chatContainer.appendChild(badge);
         }
@@ -226,6 +293,16 @@
             badge.className = `tool-call-badge ${status}`;
         }
     }
+
+    // Update tool badge title (for progress)
+    function updateToolBadgeTitle(toolName, newTitle) {
+        const badge = document.querySelector(`.tool-call-badge[data-tool="${toolName}"]`);
+        if (badge) {
+            const span = badge.querySelector('span');
+            if (span) span.textContent = newTitle;
+        }
+    }
+
 
     // Add error message
     function addErrorMessage(error) {
@@ -265,45 +342,21 @@
 
         // Code blocks
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
-
-        // Inline code
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-        // Bold
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-        // Italic
         html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-        // Links
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-
-        // Headers
         html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
         html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-        // Lists
         html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
         html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
         html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
-
-        // Wrap consecutive list items
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-        // Paragraphs
         html = html.replace(/\n\n/g, '</p><p>');
         html = html.replace(/\n/g, '<br>');
-
-        // Clean up
         html = '<p>' + html + '</p>';
         html = html.replace(/<p><\/p>/g, '');
-        html = html.replace(/<p>(<h[1-3]>)/g, '$1');
-        html = html.replace(/(<\/h[1-3]>)<\/p>/g, '$1');
-        html = html.replace(/<p>(<ul>)/g, '$1');
-        html = html.replace(/(<\/ul>)<\/p>/g, '$1');
-        html = html.replace(/<p>(<pre>)/g, '$1');
-        html = html.replace(/(<\/pre>)<\/p>/g, '$1');
 
         return html;
     }
@@ -323,7 +376,6 @@
         }
 
         hideWelcome();
-
         messages.forEach(msg => {
             if (msg.content) {
                 addMessage(msg.content, msg.role);
@@ -333,164 +385,102 @@
 
     // Clear chat
     function clearChat() {
-        // Remove all messages except welcome
         const messages = chatContainer.querySelectorAll('.message, .tool-call-badge, .error-message');
         messages.forEach(m => m.remove());
         showWelcome();
-        // Clear background state
-        if (port) port.postMessage({ action: 'clearConversation' });
     }
 
-    // Show/hide welcome message
-    function showWelcome() {
-        welcomeMessage.style.display = 'block';
-    }
-
-    function hideWelcome() {
-        welcomeMessage.style.display = 'none';
-    }
-
-    // Scroll to bottom of chat
-    function scrollToBottom() {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
+    function showWelcome() { welcomeMessage.style.display = 'block'; }
+    function hideWelcome() { welcomeMessage.style.display = 'none'; }
+    function scrollToBottom() { chatContainer.scrollTop = chatContainer.scrollHeight; }
 
     // Send message
     function sendMessage() {
         const text = messageInput.value.trim();
-        if (!text || isStreaming) return;
-
-        if (!port) {
-            showToast('Connection lost. Reconnecting...', false);
-            connect();
-            return;
-        }
+        if (!text || isStreaming || !port) return;
 
         port.postMessage({
             action: 'sendMessage',
-            text: text
+            text: text,
+            tabId: tabId
         });
 
         messageInput.value = '';
         updateSendButton();
-        autoResizeInput();
     }
 
-    // Update send button state
     function updateSendButton() {
         sendBtn.disabled = !messageInput.value.trim() || isStreaming;
     }
 
-    // Auto-resize textarea
     function autoResizeInput() {
         messageInput.style.height = 'auto';
         messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     }
 
-    // Settings modal functions
-    function openSettingsModal() {
-        settingsModal.classList.add('visible');
-    }
-
-    function closeSettingsModal() {
-        settingsModal.classList.remove('visible');
-    }
+    function openSettingsModal() { settingsModal.classList.add('visible'); }
+    function closeSettingsModal() { settingsModal.classList.remove('visible'); }
 
     function toggleApiKeyVisibility() {
-        const type = apiKeyInput.type === 'password' ? 'text' : 'password';
-        apiKeyInput.type = type;
+        apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
     }
 
-    function saveApiKey() {
+    function saveSettings() {
+        if (!port) return;
+
         const apiKey = apiKeyInput.value.trim();
-        if (!apiKey) return;
+        const modelSelect = document.getElementById('model-select');
+        const model = modelSelect?.value || 'gemini-2.5-flash';
 
-        if (!port) {
-            showToast('Connection lost. Reconnecting...', false);
-            connect();
-            return;
-        }
-
+        // Send settings to background
         port.postMessage({
-            action: 'setApiKey',
-            apiKey: apiKey
+            action: 'saveSettings',
+            apiKey: apiKey || null,  // null if empty (don't overwrite existing)
+            model: model,
+            tabId
         });
 
         apiKeyInput.value = '';
     }
 
-    // API key banner
-    function showApiKeyBanner() {
-        apiKeyBanner.classList.add('visible');
-    }
+    function showApiKeyBanner() { apiKeyBanner.classList.add('visible'); }
+    function hideApiKeyBanner() { apiKeyBanner.classList.remove('visible'); }
 
-    function hideApiKeyBanner() {
-        apiKeyBanner.classList.remove('visible');
-    }
-
-    // Show toast notification
     function showToast(message, isSuccess = true) {
-        // Create toast element
         const toast = document.createElement('div');
-        toast.className = 'toast-notification';
         toast.style.cssText = `
-            position: fixed;
-            bottom: 120px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${isSuccess ? '#10B981' : '#EF4444'};
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 13px;
-            z-index: 1000;
-            animation: fadeInUp 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+            background: ${isSuccess ? '#10B981' : '#EF4444'}; color: white;
+            padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 1000;
         `;
         toast.textContent = message;
         document.body.appendChild(toast);
-
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transition = 'opacity 0.3s';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        setTimeout(() => toast.remove(), 3000);
     }
 
     // Event Listeners
-    messageInput.addEventListener('input', () => {
-        updateSendButton();
-        autoResizeInput();
-    });
-
+    messageInput.addEventListener('input', () => { updateSendButton(); autoResizeInput(); });
     messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
 
     sendBtn.addEventListener('click', sendMessage);
-
     clearBtn.addEventListener('click', () => {
-        if (confirm('Clear conversation history?')) {
-            clearChat(); // Action sent inside clearChat if port exists
+        if (confirm('Clear conversation?') && port) {
+            port.postMessage({ action: 'clearConversation', tabId });
         }
     });
 
     settingsBtn.addEventListener('click', openSettingsModal);
     modalClose.addEventListener('click', closeSettingsModal);
     toggleKeyBtn.addEventListener('click', toggleApiKeyVisibility);
-    saveApiKeyBtn.addEventListener('click', saveApiKey);
+    saveApiKeyBtn.addEventListener('click', saveSettings);
     openSettingsBanner.addEventListener('click', openSettingsModal);
 
     settingsModal.addEventListener('click', (e) => {
-        if (e.target === settingsModal) {
-            closeSettingsModal();
-        }
+        if (e.target === settingsModal) closeSettingsModal();
     });
 
-    // Suggestion chips
     suggestionChips.forEach(chip => {
         chip.addEventListener('click', () => {
             const message = chip.dataset.message;
@@ -507,77 +497,72 @@
     const testModeBtn = document.getElementById('test-mode-btn');
     const closeTestPanelBtn = document.getElementById('close-test-panel');
     const testOutput = document.getElementById('test-output-content');
-
-    // Test mode elements
     const testSearchBtn = document.getElementById('test-search-btn');
     const testSearchKeyword = document.getElementById('test-search-keyword');
     const testScrapeBtn = document.getElementById('test-scrape-btn');
     const testScrapeMax = document.getElementById('test-scrape-max');
+    const testDeepScrapeBtn = document.getElementById('test-deep-scrape-btn');
+    const testDeepUrls = document.getElementById('test-deep-urls');
     const testPageInfoBtn = document.getElementById('test-pageinfo-btn');
     const testWaitContentBtn = document.getElementById('test-waitcontent-btn');
 
     function toggleTestPanel() {
-        testPanel.classList.toggle('visible');
+        if (testPanel) testPanel.classList.toggle('visible');
     }
 
     function setTestOutput(data) {
-        testOutput.textContent = JSON.stringify(data, null, 2);
+        if (testOutput) {
+            // If data is a string, show it directly; otherwise JSON stringify
+            if (typeof data === 'string') {
+                testOutput.textContent = data;
+            } else {
+                testOutput.textContent = JSON.stringify(data, null, 2);
+            }
+        }
     }
 
-    // Send test tool request through the background script
     function runTestTool(action, params = {}) {
-        if (!port) {
-            setTestOutput({ error: 'Not connected to background script' });
-            return;
-        }
+        if (!port) { setTestOutput({ error: 'Not connected' }); return; }
+        setTestOutput({ status: 'Running...', action });
+        port.postMessage({ action: 'testTool', toolAction: action, toolParams: params, tabId });
+    }
 
-        setTestOutput({ status: 'Running...', action, params });
-
-        // Send to background, which will forward to content script
-        port.postMessage({
-            action: 'testTool',
-            toolAction: action,
-            toolParams: params
+    if (testModeBtn) testModeBtn.addEventListener('click', toggleTestPanel);
+    if (closeTestPanelBtn) closeTestPanelBtn.addEventListener('click', toggleTestPanel);
+    if (testSearchBtn) {
+        testSearchBtn.addEventListener('click', () => {
+            const keyword = testSearchKeyword?.value.trim();
+            if (!keyword) { setTestOutput({ error: 'Enter keyword' }); return; }
+            runTestTool('searchShopee', { keyword });
         });
     }
-
-    if (testModeBtn) {
-        testModeBtn.addEventListener('click', toggleTestPanel);
+    if (testScrapeBtn) {
+        testScrapeBtn.addEventListener('click', () => {
+            const maxItems = parseInt(testScrapeMax?.value) || 20;
+            runTestTool('scrapeListings', { maxItems });
+        });
     }
+    if (testDeepScrapeBtn) {
+        testDeepScrapeBtn.addEventListener('click', () => {
+            const urlsText = testDeepUrls?.value.trim();
+            if (!urlsText) { setTestOutput({ error: 'Enter at least one product URL' }); return; }
 
-    if (closeTestPanelBtn) {
-        closeTestPanelBtn.addEventListener('click', toggleTestPanel);
-    }
+            // Parse URLs - one per line, filter empties
+            const urls = urlsText.split('\n')
+                .map(url => url.trim())
+                .filter(url => url.length > 0 && url.includes('shopee'));
 
-    if (testSearchBtn) {
-        testSearchBtn.addEventListener('click', async () => {
-            const keyword = testSearchKeyword.value.trim();
-            if (!keyword) {
-                setTestOutput({ error: 'Please enter a keyword' });
+            if (urls.length === 0) {
+                setTestOutput({ error: 'No valid Shopee URLs found. Enter URLs one per line.' });
                 return;
             }
-            await runTestTool('searchShopee', { keyword });
-        });
-    }
 
-    if (testScrapeBtn) {
-        testScrapeBtn.addEventListener('click', async () => {
-            const maxItems = parseInt(testScrapeMax.value) || 20;
-            await runTestTool('scrapeListings', { maxItems });
+            setTestOutput({ status: `Deep scraping ${urls.length} URL(s)...`, urls });
+            runTestTool('deepScrapeUrls', { urls });
         });
     }
-
-    if (testPageInfoBtn) {
-        testPageInfoBtn.addEventListener('click', async () => {
-            await runTestTool('getPageInfo', {});
-        });
-    }
-
-    if (testWaitContentBtn) {
-        testWaitContentBtn.addEventListener('click', async () => {
-            await runTestTool('waitForContent', { timeout: 10000 });
-        });
-    }
+    if (testPageInfoBtn) testPageInfoBtn.addEventListener('click', () => runTestTool('getPageInfo'));
+    if (testWaitContentBtn) testWaitContentBtn.addEventListener('click', () => runTestTool('waitForContent', { timeout: 10000 }));
 
     // Initialize
     connect();

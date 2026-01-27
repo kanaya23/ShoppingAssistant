@@ -1,15 +1,18 @@
 /**
  * Shopee Shopping Assistant - Background Script
- * Handles communication between sidebar, content scripts, and Gemini API
+ * Handles communication between sidebar popup, content scripts, and Gemini API
  */
 
-// Connection state management
+// Connection state management with message queue
 const ConnectionManager = {
     ports: new Map(), // tabId -> port
-    sidebarStates: new Map(), // tabId -> boolean (isOpen)
+    sidebarWindows: new Map(), // tabId -> windowId
+    messageQueues: new Map(), // tabId -> Array of pending messages
+    activeTabId: null, // Track which tab the sidebar is associated with
 
     setPort(tabId, port) {
         this.ports.set(tabId, port);
+        this.flushQueue(tabId);
     },
 
     getPort(tabId) {
@@ -17,20 +20,37 @@ const ConnectionManager = {
     },
 
     removePort(tabId) {
-        if (this.ports.has(tabId)) {
-            const currentPort = this.ports.get(tabId);
-            // Only remove if it's the specific port instance (avoid race conditions)
-            // But here we likely want to just clean up
-            this.ports.delete(tabId);
+        this.ports.delete(tabId);
+    },
+
+    setSidebarWindow(tabId, windowId) {
+        this.sidebarWindows.set(tabId, windowId);
+    },
+
+    getSidebarWindow(tabId) {
+        return this.sidebarWindows.get(tabId);
+    },
+
+    queueMessage(tabId, message) {
+        if (!this.messageQueues.has(tabId)) {
+            this.messageQueues.set(tabId, []);
         }
+        this.messageQueues.get(tabId).push(message);
     },
 
-    setSidebarState(tabId, isOpen) {
-        this.sidebarStates.set(tabId, isOpen);
-    },
+    flushQueue(tabId) {
+        const port = this.ports.get(tabId);
+        const queue = this.messageQueues.get(tabId);
 
-    isSidebarOpen(tabId) {
-        return this.sidebarStates.get(tabId) || false;
+        if (port && queue && queue.length > 0) {
+            console.log('Flushing', queue.length, 'queued messages');
+            for (const message of queue) {
+                try {
+                    port.postMessage(message);
+                } catch (e) { }
+            }
+            this.messageQueues.set(tabId, []);
+        }
     }
 };
 
@@ -69,46 +89,75 @@ const ConversationManager = {
     }
 };
 
+
+// Open sidebar in a popup window
+async function openSidebarWindow(tabId) {
+    const existingWindowId = ConnectionManager.getSidebarWindow(tabId);
+
+    // Check if window already exists
+    if (existingWindowId) {
+        try {
+            await browser.windows.update(existingWindowId, { focused: true });
+            return existingWindowId;
+        } catch (e) {
+            // Window was closed, create new one
+        }
+    }
+
+    // Create a new popup window
+    const sidebarUrl = browser.runtime.getURL(`sidebar/sidebar.html?tabId=${tabId}`);
+    const window = await browser.windows.create({
+        url: sidebarUrl,
+        type: 'popup',
+        width: 420,
+        height: 700,
+        left: screen.width - 450,
+        top: 100
+    });
+
+    ConnectionManager.setSidebarWindow(tabId, window.id);
+    ConnectionManager.activeTabId = tabId;
+
+    return window.id;
+}
+
 // Handle sidebar connection
 browser.runtime.onConnect.addListener((port) => {
     if (port.name === 'sidebar') {
-        console.log('Sidebar connected');
+        console.log('Sidebar popup connected');
 
-        // For injected iframe, sender.tab.id IS available
-        if (port.sender && port.sender.tab) {
-            const tabId = port.sender.tab.id;
-            ConnectionManager.setPort(tabId, port);
-            ConnectionManager.setSidebarState(tabId, true);
-
-            port.onDisconnect.addListener(() => {
-                const currentPort = ConnectionManager.getPort(tabId);
-                if (currentPort === port) {
-                    ConnectionManager.removePort(tabId);
-                }
-                console.log('Sidebar disconnected for tab', tabId);
-            });
-        }
-
+        // Get tabId from URL query param (passed when opening popup)
         port.onMessage.addListener(async (message) => {
-            await handleSidebarMessage(message, port);
-        });
-    }
-});
+            const tabId = message.tabId || ConnectionManager.activeTabId;
 
-// Restore sidebar state after navigation
-browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete') {
-        if (ConnectionManager.isSidebarOpen(tabId)) {
-            console.log('Restoring sidebar for tab', tabId);
-            // Send message to content script to open sidebar
-            // We use a small delay to ensure content script is ready
-            setTimeout(() => {
-                browser.tabs.sendMessage(tabId, { action: 'openSidebar' }).catch(err => {
-                    // Content script might not be ready or page not compatible
-                    console.log('Could not restore sidebar:', err);
-                });
-            }, 1000);
-        }
+            if (message.action === 'init' && tabId) {
+                ConnectionManager.setPort(tabId, port);
+                ConnectionManager.activeTabId = tabId;
+
+                // Send API key status
+                port.postMessage({ action: 'apiKey', hasKey: !!(await GeminiAPI.getApiKey()) });
+
+                // Send current model
+                port.postMessage({ action: 'currentModel', model: await GeminiAPI.getModel() });
+
+                // Send conversation history
+                const history = ConversationManager.getMessages(tabId);
+                port.postMessage({ action: 'conversationHistory', messages: history });
+                return;
+            }
+
+            await handleSidebarMessage(message, port, tabId);
+        });
+
+        port.onDisconnect.addListener(() => {
+            // Find and remove the port
+            for (const [tabId, p] of ConnectionManager.ports) {
+                if (p === port) {
+                    ConnectionManager.removePort(tabId);
+                    break;
+                }
+            }
+        });
     }
 });
 
@@ -119,43 +168,19 @@ function sendToSidebar(tabId, message) {
         try {
             port.postMessage(message);
         } catch (e) {
-            console.error('Failed to send to sidebar:', e);
-            ConnectionManager.removePort(tabId);
+            ConnectionManager.queueMessage(tabId, message);
         }
+    } else {
+        ConnectionManager.queueMessage(tabId, message);
     }
 }
 
 // Handle messages from sidebar
-async function handleSidebarMessage(message, port) {
-    console.log('Background received message:', message);
-
-    // Use the sender's tab ID for conversation tracking
-    const tabId = port.sender?.tab?.id || message.tabId;
-
-    if (message.action === 'init') {
-        if (tabId) {
-            ConnectionManager.setPort(tabId, port);
-            ConnectionManager.setSidebarState(tabId, true);
-        }
-
-        // Initialize the sidebar state
-        port.postMessage({ action: 'apiKey', hasKey: !!(await GeminiAPI.getApiKey()) });
-
-        if (tabId) {
-            const history = ConversationManager.getMessages(tabId);
-            port.postMessage({ action: 'conversationHistory', messages: history });
-        }
-        return;
-    }
-
-    if (!tabId) {
-        console.error('No tab ID found for message');
-        return;
-    }
+async function handleSidebarMessage(message, port, tabId) {
+    console.log('Background received:', message.action);
 
     switch (message.action) {
         case 'sendMessage':
-            // Don't pass 'port', allow processUserMessage to look it up
             await processUserMessage(message.text, tabId);
             break;
 
@@ -172,11 +197,26 @@ async function handleSidebarMessage(message, port) {
         case 'setApiKey':
             try {
                 await browser.storage.local.set({ geminiApiKey: message.apiKey });
-                console.log('API key saved successfully');
                 port.postMessage({ action: 'apiKeySet', success: true });
             } catch (error) {
                 console.error('Failed to save API key:', error);
                 port.postMessage({ action: 'apiKeySet', success: false, error: error.message });
+            }
+            break;
+
+        case 'saveSettings':
+            try {
+                // Save API key if provided
+                if (message.apiKey) {
+                    await browser.storage.local.set({ geminiApiKey: message.apiKey });
+                }
+                // Always save model
+                if (message.model) {
+                    await browser.storage.local.set({ geminiModel: message.model });
+                }
+                port.postMessage({ action: 'settingsSaved', success: true });
+            } catch (error) {
+                port.postMessage({ action: 'settingsSaved', success: false, error: error.message });
             }
             break;
 
@@ -191,12 +231,43 @@ async function handleSidebarMessage(message, port) {
             break;
 
         case 'testTool':
-            // Forward test tool request to content script
             try {
-                const testResult = await browser.tabs.sendMessage(tabId, {
-                    action: message.toolAction,
-                    ...message.toolParams
-                });
+                let testResult;
+
+                // Route certain actions through ToolExecutor instead of content script
+                if (message.toolAction === 'scrapeListings') {
+                    // Use ToolExecutor for main page scrape
+                    testResult = await ToolExecutor.scrapeListings(
+                        message.toolParams?.maxItems || 20,
+                        tabId
+                    );
+                } else if (message.toolAction === 'deepScrapeUrls') {
+                    // Use ToolExecutor for deep scraping specific URLs
+                    testResult = await ToolExecutor.deepScrapeUrls(
+                        message.toolParams?.urls || []
+                    );
+                } else if (message.toolAction === 'searchShopee') {
+                    // Use ToolExecutor for search
+                    testResult = await ToolExecutor.searchShopee(
+                        message.toolParams?.keyword,
+                        tabId
+                    );
+                } else if (message.toolAction === 'waitForContent') {
+                    // Check if content script is ready
+                    try {
+                        await ToolExecutor.waitForContentScript(tabId, message.toolParams?.timeout || 5000);
+                        testResult = { success: true, message: 'Content script is ready' };
+                    } catch (e) {
+                        testResult = { success: false, error: e.message };
+                    }
+                } else {
+                    // Send other actions directly to content script
+                    testResult = await browser.tabs.sendMessage(tabId, {
+                        action: message.toolAction,
+                        ...message.toolParams
+                    });
+                }
+
                 port.postMessage({ action: 'testToolResult', result: testResult });
             } catch (error) {
                 port.postMessage({
@@ -224,6 +295,18 @@ async function processUserMessage(text, tabId) {
 
     conversation.isProcessing = true;
 
+    // Tool usage tracker - enforce limits to prevent loops
+    const toolUsage = {
+        search_shopee: 0,
+        scrape_listings: 0
+    };
+    const TOOL_LIMITS = {
+        search_shopee: 1,      // Only search once
+        scrape_listings: 1,    // Only scrape once
+        deep_scrape_urls: 1    // Only deep scrape once
+    };
+    let scrapedData = null; // Store scraped data for rejection message
+
     // Add user message
     ConversationManager.addMessage(tabId, 'user', text);
     sendToSidebar(tabId, { action: 'messageAdded', role: 'user', content: text });
@@ -233,17 +316,13 @@ async function processUserMessage(text, tabId) {
 
     try {
         let fullResponse = '';
-        let pendingToolCalls = [];
 
-        // Stream callback
         const onChunk = (chunk) => {
             fullResponse += chunk;
             sendToSidebar(tabId, { action: 'streamChunk', chunk });
         };
 
-        // Tool call callback
         const onToolCall = (toolCall) => {
-            pendingToolCalls.push(toolCall);
             sendToSidebar(tabId, {
                 action: 'toolCall',
                 name: toolCall.name,
@@ -251,36 +330,79 @@ async function processUserMessage(text, tabId) {
             });
         };
 
-        // Send to Gemini
         const messages = ConversationManager.getMessages(tabId);
         let response = await GeminiAPI.sendMessage(messages, onChunk, onToolCall);
 
-        // Process tool calls if any
-        while (response.toolCalls && response.toolCalls.length > 0) {
+        // Process tool calls with limits
+        let loopCount = 0;
+        const MAX_LOOPS = 5; // Hard limit on tool call loops
+
+        while (response.toolCalls && response.toolCalls.length > 0 && loopCount < MAX_LOOPS) {
+            loopCount++;
+
             for (const toolCall of response.toolCalls) {
-                sendToSidebar(tabId, {
-                    action: 'toolExecuting',
-                    name: toolCall.name
-                });
+                const toolName = toolCall.name;
+                toolUsage[toolName] = (toolUsage[toolName] || 0) + 1;
 
-                // Execute the tool
-                const result = await ToolExecutor.execute(
-                    toolCall.name,
-                    toolCall.args,
-                    tabId
-                );
+                let result;
 
-                sendToSidebar(tabId, {
-                    action: 'toolResult',
-                    name: toolCall.name,
-                    result
-                });
+                // Check if tool has exceeded its limit
+                const limit = TOOL_LIMITS[toolName] || 1; // Default to 1 if not specified
 
-                // Continue conversation with tool result
+                if (toolUsage[toolName] > limit) {
+                    // Reject the tool call with a message to use existing data
+                    console.log(`Tool ${toolName} exceeded limit (${toolUsage[toolName]}/${limit})`);
+
+                    result = {
+                        error: 'LIMIT_REACHED',
+                        message: `You have already used the ${toolName} tool in this turn. Do NOT call it again. Analyze the data you already have to provide your specific detailed response.`,
+                        existingData: scrapedData
+                    };
+
+                    sendToSidebar(tabId, {
+                        action: 'toolResult',
+                        name: toolName,
+                        result: { limited: true, error: result.error }
+                    });
+                } else {
+
+
+                    // Execute the tool normally
+                    sendToSidebar(tabId, {
+                        action: 'toolExecuting',
+                        name: toolName
+                    });
+
+                    result = await ToolExecutor.execute(
+                        toolName,
+                        toolCall.args,
+                        tabId,
+                        (current, total) => {
+                            sendToSidebar(tabId, {
+                                action: 'toolProgress',
+                                name: toolName,
+                                current,
+                                total
+                            });
+                        }
+                    );
+
+                    // Store scraped data for later reference
+                    if (toolName === 'scrape_listings' && result.data) {
+                        scrapedData = result.data;
+                    }
+
+                    sendToSidebar(tabId, {
+                        action: 'toolResult',
+                        name: toolName,
+                        result
+                    });
+                }
+
                 fullResponse = '';
                 response = await GeminiAPI.continueWithToolResult(
                     messages,
-                    toolCall.name,
+                    toolName,
                     result,
                     onChunk,
                     onToolCall
@@ -288,7 +410,10 @@ async function processUserMessage(text, tabId) {
             }
         }
 
-        // Add assistant response
+        if (loopCount >= MAX_LOOPS) {
+            console.log('Max tool loops reached, forcing response');
+        }
+
         if (fullResponse) {
             ConversationManager.addMessage(tabId, 'assistant', fullResponse);
         }
@@ -306,32 +431,28 @@ async function processUserMessage(text, tabId) {
     }
 }
 
-// Handle browser action click - toggle sidebar via content script
+// Handle browser action click - open popup window
 browser.browserAction.onClicked.addListener(async (tab) => {
-    try {
-        const isOpen = ConnectionManager.isSidebarOpen(tab.id);
-        // Toggle logic
-        ConnectionManager.setSidebarState(tab.id, !isOpen);
-
-        await browser.tabs.sendMessage(tab.id, { action: 'toggleSidebar' });
-    } catch (error) {
-        console.error('Failed to toggle sidebar:', error);
-    }
+    await openSidebarWindow(tab.id);
 });
 
-// Handle messages from content script
+// Handle messages from content script (FAB click)
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Content script listeners
-    if (message.action === 'toggleSidebar') {
-        if (sender.tab) {
-            // We can't know the exact new state from here easily, but we can assume user action toggles it
-            const currentState = ConnectionManager.isSidebarOpen(sender.tab.id);
-            ConnectionManager.setSidebarState(sender.tab.id, !currentState);
-        }
+    if (message.action === 'openSidebarWindow' && sender.tab) {
+        openSidebarWindow(sender.tab.id);
         sendResponse({ success: true });
     }
     return true;
 });
 
-// Initialize
+// Clean up closed sidebar windows
+browser.windows.onRemoved.addListener((windowId) => {
+    for (const [tabId, wId] of ConnectionManager.sidebarWindows) {
+        if (wId === windowId) {
+            ConnectionManager.sidebarWindows.delete(tabId);
+            break;
+        }
+    }
+});
+
 console.log('Shopee Shopping Assistant background script loaded');
