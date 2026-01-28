@@ -12,12 +12,15 @@
     const welcomeMessage = document.getElementById('welcome-message');
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
     const clearBtn = document.getElementById('clear-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
     const modalClose = document.getElementById('modal-close');
     const apiKeyInput = document.getElementById('api-key-input');
     const toggleKeyBtn = document.getElementById('toggle-key');
+    const serperKeyInput = document.getElementById('serper-key-input');
+    const toggleSerperKeyBtn = document.getElementById('toggle-serper-key');
     const saveApiKeyBtn = document.getElementById('save-api-key');
     const apiKeyBanner = document.getElementById('api-key-banner');
     const openSettingsBanner = document.getElementById('open-settings-banner');
@@ -425,10 +428,15 @@
         apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
     }
 
+    function toggleSerperKeyVisibility() {
+        serperKeyInput.type = serperKeyInput.type === 'password' ? 'text' : 'password';
+    }
+
     function saveSettings() {
         if (!port) return;
 
         const apiKey = apiKeyInput.value.trim();
+        const serperKey = serperKeyInput.value.trim();
         const modelSelect = document.getElementById('model-select');
         const model = modelSelect?.value || 'gemini-2.5-flash';
 
@@ -436,11 +444,13 @@
         port.postMessage({
             action: 'saveSettings',
             apiKey: apiKey || null,  // null if empty (don't overwrite existing)
+            serperKey: serperKey || null,
             model: model,
             tabId
         });
 
         apiKeyInput.value = '';
+        serperKeyInput.value = '';
     }
 
     function showApiKeyBanner() { apiKeyBanner.classList.add('visible'); }
@@ -465,6 +475,19 @@
     });
 
     sendBtn.addEventListener('click', sendMessage);
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', async () => {
+            try {
+                // Try to toggle locally first (faster, reliable)
+                const win = await browser.windows.getCurrent();
+                const newState = win.state === 'fullscreen' ? 'normal' : 'fullscreen';
+                await browser.windows.update(win.id, { state: newState });
+            } catch (e) {
+                console.error('Local fullscreen toggle failed, using background fallback:', e);
+                if (port) port.postMessage({ action: 'toggleFullscreen', tabId });
+            }
+        });
+    }
     clearBtn.addEventListener('click', () => {
         if (confirm('Clear conversation?') && port) {
             port.postMessage({ action: 'clearConversation', tabId });
@@ -474,6 +497,7 @@
     settingsBtn.addEventListener('click', openSettingsModal);
     modalClose.addEventListener('click', closeSettingsModal);
     toggleKeyBtn.addEventListener('click', toggleApiKeyVisibility);
+    if (toggleSerperKeyBtn) toggleSerperKeyBtn.addEventListener('click', toggleSerperKeyVisibility);
     saveApiKeyBtn.addEventListener('click', saveSettings);
     openSettingsBanner.addEventListener('click', openSettingsModal);
 
@@ -481,16 +505,71 @@
         if (e.target === settingsModal) closeSettingsModal();
     });
 
-    suggestionChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            const message = chip.dataset.message;
-            if (message) {
-                messageInput.value = message;
+    // ============ DYNAMIC SUGGESTIONS ============
+    const SUGGESTION_POOL = [
+        // Tech & Gadgets
+        { icon: '📱', label: 'Best mid-range phones 2024', message: 'Find me the best mid-range smartphones released in late 2023 or 2024 available on Shopee.' },
+        { icon: '🎧', label: 'Wireless earbuds under 500k', message: 'Recommend top-rated true wireless earbuds under Rp 500.000 with good bass.' },
+        { icon: '⌨️', label: 'Mechanical keyboards for work', message: 'Suggest mechanical keyboards suitable for office work, preferably silent switches.' },
+        { icon: '🖱️', label: 'Ergonomic mouse cheap', message: 'Find affordable ergonomic mouse options for large hands.' },
+        { icon: '🔋', label: '20000mAh power banks', message: 'Show me reliable 20.000mAh power banks with fast charging support.' },
+        { icon: '🎮', label: 'Budget gaming headset', message: 'What are the best budget gaming headsets with a microphone under 300k?' },
+
+        // Home & Living
+        { icon: '🔧', label: 'Complete screwdriver set', message: 'Find a complete precision screwdriver set for repairing electronics.' },
+        { icon: '💡', label: 'Smart LED bulbs', message: 'Compare affordable smart LED bulbs compatible with Google Home.' },
+        { icon: '🍳', label: 'Non-stick frying pans', message: 'Recommend durable non-stick frying pans that are PFOA free.' },
+        { icon: '🧹', label: 'Robot vacuum cleaners', message: 'Find good entry-level robot vacuum cleaners available on Shopee.' },
+        { icon: '🪑', label: 'Ergonomic office chair', message: 'Look for high-rated ergonomic office chairs under 2 million.' },
+        { icon: '🌡️', label: 'Digital thermometer', message: 'Find accurate digital thermometers for cooking.' },
+
+        // Fashion & Beauty
+        { icon: '👟', label: 'Running shoes for beginners', message: 'Suggest comfortable running shoes for beginners under 1 million.' },
+        { icon: '🎒', label: 'Waterproof laptop backpack', message: 'Find a stylish waterproof backpack that fits a 15.6 inch laptop.' },
+        { icon: '🕶️', label: 'Polarized sunglasses', message: 'Search for cool polarized sunglasses for driving.' },
+        { icon: '🧴', label: 'Sunscreen for oily skin', message: 'Recommend popular sunscreens for oily and acne-prone skin.' },
+
+        // Hobbies & Gifts
+        { icon: '🎁', label: 'Gift for tech lover', message: 'Give me 5 gift ideas for a tech enthusiast under Rp 200.000.' },
+        { icon: '🎨', label: 'Watercolor starter set', message: 'Find a good quality watercolor painting set for beginners.' },
+        { icon: '⛺', label: 'Camping tent for 2', message: 'Show me lightweight camping tents suitable for 2 people.' },
+        { icon: '🚗', label: 'Car detailed cleaning kit', message: 'Find a complete car detailing kit with microfiber towels.' },
+
+        // Comparison
+        { icon: '🆚', label: 'Sony vs JBL headphones', message: 'Compare Sony and JBL wireless headphones in the 1-2 million price range.' },
+        { icon: '🆚', label: 'Logitech vs Razer mouse', message: 'Compare budget gaming mice from Logitech and Razer.' },
+        { icon: '📊', label: 'Top rated air fryers', message: 'Find the top 3 rated air fryers on Shopee and compare their features.' }
+    ];
+
+    function getRandomSuggestions(count = 3) {
+        const shuffled = [...SUGGESTION_POOL].sort(() => 0.5 - Math.random());
+        return shuffled.slice(0, count);
+    }
+
+    function renderSuggestions() {
+        const container = document.querySelector('.suggestions');
+        if (!container) return;
+
+        container.innerHTML = ''; // Clear existing
+
+        const suggestions = getRandomSuggestions(3);
+
+        suggestions.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = 'suggestion-chip';
+            btn.innerHTML = `${item.icon} ${item.label}`;
+            // Store message in dataset or closure
+            btn.addEventListener('click', () => {
+                messageInput.value = item.message;
                 updateSendButton();
                 sendMessage();
-            }
+            });
+            container.appendChild(btn);
         });
-    });
+    }
+
+    // Initial render
+    renderSuggestions();
 
     // ============ TEST MODE ============
     const testPanel = document.getElementById('test-panel');
@@ -500,7 +579,7 @@
     const testSearchBtn = document.getElementById('test-search-btn');
     const testSearchKeyword = document.getElementById('test-search-keyword');
     const testScrapeBtn = document.getElementById('test-scrape-btn');
-    const testScrapeMax = document.getElementById('test-scrape-max');
+
     const testDeepScrapeBtn = document.getElementById('test-deep-scrape-btn');
     const testDeepUrls = document.getElementById('test-deep-urls');
     const testPageInfoBtn = document.getElementById('test-pageinfo-btn');
@@ -521,6 +600,9 @@
         }
     }
 
+    const testSerperBtn = document.getElementById('test-serper-btn');
+    const testSerperQuery = document.getElementById('test-serper-query');
+
     function runTestTool(action, params = {}) {
         if (!port) { setTestOutput({ error: 'Not connected' }); return; }
         setTestOutput({ status: 'Running...', action });
@@ -536,10 +618,17 @@
             runTestTool('searchShopee', { keyword });
         });
     }
+    if (testSerperBtn) {
+        testSerperBtn.addEventListener('click', () => {
+            const query = testSerperQuery?.value.trim();
+            if (!query) { setTestOutput({ error: 'Enter query' }); return; }
+            runTestTool('serperSearch', { query });
+        });
+    }
     if (testScrapeBtn) {
         testScrapeBtn.addEventListener('click', () => {
-            const maxItems = parseInt(testScrapeMax?.value) || 20;
-            runTestTool('scrapeListings', { maxItems });
+            // New behavior: Scrape all (smart scroll)
+            runTestTool('scrapeListings');
         });
     }
     if (testDeepScrapeBtn) {

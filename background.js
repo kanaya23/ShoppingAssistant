@@ -78,6 +78,34 @@ const ConversationManager = {
         });
     },
 
+    // Add a raw message object (useful for tool calls/results)
+    addPart(tabId, messageObj) {
+        const conversation = this.getOrCreate(tabId);
+        conversation.messages.push({
+            ...messageObj,
+            timestamp: Date.now()
+        });
+    },
+
+    addToolCall(tabId, toolCall) {
+        this.addPart(tabId, {
+            role: 'model',
+            parts: [{ functionCall: toolCall }]
+        });
+    },
+
+    addToolResult(tabId, toolName, result) {
+        this.addPart(tabId, {
+            role: 'user',
+            parts: [{
+                functionResponse: {
+                    name: toolName,
+                    response: result
+                }
+            }]
+        });
+    },
+
     getMessages(tabId) {
         return this.getOrCreate(tabId).messages;
     },
@@ -210,6 +238,10 @@ async function handleSidebarMessage(message, port, tabId) {
                 if (message.apiKey) {
                     await browser.storage.local.set({ geminiApiKey: message.apiKey });
                 }
+                // Save Serper key if provided
+                if (message.serperKey) {
+                    await browser.storage.local.set({ serperApiKey: message.serperKey });
+                }
                 // Always save model
                 if (message.model) {
                     await browser.storage.local.set({ geminiModel: message.model });
@@ -238,7 +270,7 @@ async function handleSidebarMessage(message, port, tabId) {
                 if (message.toolAction === 'scrapeListings') {
                     // Use ToolExecutor for main page scrape
                     testResult = await ToolExecutor.scrapeListings(
-                        message.toolParams?.maxItems || 20,
+                        message.toolParams?.maxItems || 1000,
                         tabId
                     );
                 } else if (message.toolAction === 'deepScrapeUrls') {
@@ -251,6 +283,11 @@ async function handleSidebarMessage(message, port, tabId) {
                     testResult = await ToolExecutor.searchShopee(
                         message.toolParams?.keyword,
                         tabId
+                    );
+                } else if (message.toolAction === 'serperSearch') {
+                    // Use ToolExecutor for serper search
+                    testResult = await ToolExecutor.serperSearch(
+                        message.toolParams?.query
                     );
                 } else if (message.toolAction === 'waitForContent') {
                     // Check if content script is ready
@@ -277,6 +314,19 @@ async function handleSidebarMessage(message, port, tabId) {
             }
             break;
     }
+
+    if (message.action === 'toggleFullscreen') {
+        const winId = ConnectionManager.getSidebarWindow(tabId);
+        if (winId) {
+            try {
+                const win = await browser.windows.get(winId);
+                const newState = win.state === 'fullscreen' ? 'normal' : 'fullscreen';
+                await browser.windows.update(winId, { state: newState });
+            } catch (e) {
+                console.error('Failed to toggle fullscreen:', e);
+            }
+        }
+    }
 }
 
 // Process user message and get AI response
@@ -298,12 +348,14 @@ async function processUserMessage(text, tabId) {
     // Tool usage tracker - enforce limits to prevent loops
     const toolUsage = {
         search_shopee: 0,
-        scrape_listings: 0
+        scrape_listings: 0,
+        serper_search: 0
     };
     const TOOL_LIMITS = {
-        search_shopee: 1,      // Only search once
-        scrape_listings: 1,    // Only scrape once
-        deep_scrape_urls: 1    // Only deep scrape once
+        search_shopee: 2,      // Allow retry
+        scrape_listings: 2,    // Allow retry
+        deep_scrape_urls: 2,   // Allow multiple batches
+        serper_search: 5       // Allow extensive background checks
     };
     let scrapedData = null; // Store scraped data for rejection message
 
@@ -340,74 +392,82 @@ async function processUserMessage(text, tabId) {
         while (response.toolCalls && response.toolCalls.length > 0 && loopCount < MAX_LOOPS) {
             loopCount++;
 
-            for (const toolCall of response.toolCalls) {
-                const toolName = toolCall.name;
-                toolUsage[toolName] = (toolUsage[toolName] || 0) + 1;
+            // Only process the FIRST tool call (sequential execution)
+            // Gemini might return multiple parallel calls, but we handle them sequentially for updated context
+            // actually, parallel execution is supported by the API design, but our loop logic needs care.
+            // For now, let's process ALL tool calls in the response, THEN send results back.
 
-                let result;
+            // Wait, Gemini 2.0/Pro returns an array of toolCalls.
+            // We should execute all of them, record all results, then send back ONE message with all parts.
+            // However, simpler for now: Sequential processing of the primary tool call if multiple are complex.
+            // BUT, serper_search logic relies on parallel ";" check inside the tool.
 
-                // Check if tool has exceeded its limit
-                const limit = TOOL_LIMITS[toolName] || 1; // Default to 1 if not specified
+            // Standard approach:
+            // 1. Add model's tool calls to history
+            // 2. Execute tools
+            // 3. Add tool results to history
+            // 4. Send updated history to model
 
-                if (toolUsage[toolName] > limit) {
-                    // Reject the tool call with a message to use existing data
-                    console.log(`Tool ${toolName} exceeded limit (${toolUsage[toolName]}/${limit})`);
+            const toolCall = response.toolCalls[0]; // Take the first one for simplicity/safety in this loop
+            const toolName = toolCall.name;
 
-                    result = {
-                        error: 'LIMIT_REACHED',
-                        message: `You have already used the ${toolName} tool in this turn. Do NOT call it again. Analyze the data you already have to provide your specific detailed response.`,
-                        existingData: scrapedData
-                    };
+            // 1. Record the model's decision (Access the LATEST state)
+            ConversationManager.addToolCall(tabId, toolCall);
 
-                    sendToSidebar(tabId, {
-                        action: 'toolResult',
-                        name: toolName,
-                        result: { limited: true, error: result.error }
-                    });
-                } else {
+            toolUsage[toolName] = (toolUsage[toolName] || 0) + 1;
+            let result;
 
+            // Check if tool has exceeded its limit
+            const limit = TOOL_LIMITS[toolName] || 1;
 
-                    // Execute the tool normally
-                    sendToSidebar(tabId, {
-                        action: 'toolExecuting',
-                        name: toolName
-                    });
+            if (toolUsage[toolName] > limit) {
+                console.log(`Tool ${toolName} exceeded limit (${toolUsage[toolName]}/${limit})`);
+                result = {
+                    error: 'LIMIT_REACHED',
+                    message: `You have already used the ${toolName} tool in this turn. Do NOT call it again.`,
+                    existingData: scrapedData
+                };
 
-                    result = await ToolExecutor.execute(
-                        toolName,
-                        toolCall.args,
-                        tabId,
-                        (current, total) => {
-                            sendToSidebar(tabId, {
-                                action: 'toolProgress',
-                                name: toolName,
-                                current,
-                                total
-                            });
-                        }
-                    );
+                sendToSidebar(tabId, {
+                    action: 'toolResult',
+                    name: toolName,
+                    result: { limited: true, error: result.error }
+                });
+            } else {
+                sendToSidebar(tabId, { action: 'toolExecuting', name: toolName });
 
-                    // Store scraped data for later reference
-                    if (toolName === 'scrape_listings' && result.data) {
-                        scrapedData = result.data;
+                result = await ToolExecutor.execute(
+                    toolName,
+                    toolCall.args,
+                    tabId,
+                    (current, total) => {
+                        sendToSidebar(tabId, {
+                            action: 'toolProgress',
+                            name: toolName,
+                            current,
+                            total
+                        });
                     }
+                );
 
-                    sendToSidebar(tabId, {
-                        action: 'toolResult',
-                        name: toolName,
-                        result
-                    });
+                if (toolName === 'scrape_listings' && result.data) {
+                    scrapedData = result.data;
                 }
 
-                fullResponse = '';
-                response = await GeminiAPI.continueWithToolResult(
-                    messages,
-                    toolName,
-                    result,
-                    onChunk,
-                    onToolCall
-                );
+                sendToSidebar(tabId, {
+                    action: 'toolResult',
+                    name: toolName,
+                    result
+                });
             }
+
+            // 2. Record the result
+            ConversationManager.addToolResult(tabId, toolName, result);
+
+            // 3. Get next step from AI using UPDATED history
+            fullResponse = ''; // Reset buffer for next text
+            const currentMessages = ConversationManager.getMessages(tabId);
+            response = await GeminiAPI.sendMessage(currentMessages, onChunk, onToolCall);
         }
 
         if (loopCount >= MAX_LOOPS) {
@@ -415,6 +475,7 @@ async function processUserMessage(text, tabId) {
         }
 
         if (fullResponse) {
+            // The final response is already streaming via onChunk, but we need to save it to history
             ConversationManager.addMessage(tabId, 'assistant', fullResponse);
         }
 

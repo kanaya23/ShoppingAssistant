@@ -206,49 +206,104 @@
      * @param {number} maxItems - Maximum number of products to scrape
      * @returns {Promise<Array>} Array of product objects
      */
-    async function scrapeListings(maxItems = 20) {
-        console.log('[Hunter] Starting main page scrape with maxItems:', maxItems);
+    /**
+     * Scrape product listings from search results page
+     * SCROLLS AND SCRAPES until "shopee-page-controller" is found
+     * Returns: basic info for ALL products on the page
+     * @param {number} maxItems - Optional limit, though user requested "all"
+     * @returns {Promise<Array>} Array of product objects
+     */
+    async function scrapeListings(maxItems = 100) {
+        console.log('[Hunter] Starting SMART SCROLL & SCRAPE...');
 
-        // Wait for products to load
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Find product cards
-        const items = document.querySelectorAll('li.shopee-search-item-result__item, [data-sqe="item"]');
-
-        if (items.length === 0) {
-            console.warn('[Hunter] No product items found on page');
-            return [];
-        }
-
-        console.log(`[Hunter] Found ${items.length} product cards`);
-
+        const scrapedUrls = new Set();
         const products = [];
-        const limit = Math.min(items.length, maxItems);
+        let isControllerFound = false;
 
-        for (let i = 0; i < limit; i++) {
-            const item = items[i];
+        // Helper to delay execution
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            const url = extractUrl(item);
-            if (!url) continue; // Skip items without URL
+        // Get initial height to track progress
+        let lastScrollY = window.scrollY;
+        let noScrollCount = 0;
 
-            const product = {
-                index: products.length + 1,
-                name: extractTitle(item),
-                price: extractPrice(item),
-                rating: extractRating(item),
-                sold: extractSold(item),
-                url: url,
-                image: extractImage(item)
-            };
+        console.log('[Hunter] Beginning scroll loop...');
 
-            // Only add if we have essential data
-            if (product.name && product.url) {
-                products.push(product);
-                console.log(`[Hunter] Extracted product ${product.index}: ${product.name.substring(0, 40)}... | ${product.price} | ${product.rating}⭐ | ${product.sold}`);
+        while (!isControllerFound) {
+            // 1. Scrape current view
+            const items = document.querySelectorAll('li.shopee-search-item-result__item, [data-sqe="item"]');
+
+            if (items.length > 0) {
+                for (const item of items) {
+                    const url = extractUrl(item);
+                    if (!url) continue;
+
+                    // AVOID DUPLICATES
+                    if (scrapedUrls.has(url)) {
+                        continue;
+                    }
+
+                    const product = {
+                        index: products.length + 1,
+                        name: extractTitle(item),
+                        price: extractPrice(item),
+                        rating: extractRating(item),
+                        sold: extractSold(item),
+                        url: url,
+                        image: extractImage(item)
+                    };
+
+                    if (product.name && product.url) {
+                        scrapedUrls.add(url);
+                        products.push(product);
+                        console.log(`[Hunter] Scraped NEW product: ${product.name.substring(0, 30)}...`);
+                    }
+                }
+            }
+
+            // 2. Check for Stop Condition: shopee-page-controller
+            const controller = document.querySelector('.shopee-page-controller, .shopee-page-controller-v2');
+            if (controller) {
+                const rect = controller.getBoundingClientRect();
+                // Check if controller is visible in viewport/near bottom (within 100px of viewport bottom)
+                if (rect.top < window.innerHeight + 100) {
+                    console.log('[Hunter] "shopee-page-controller" is visible. Stopping scroll.');
+                    isControllerFound = true;
+                    break;
+                }
+            }
+
+            // 3. Smooth Scroll Down
+            // Scroll by a smaller chunk to mimic user and trigger lazy load
+            window.scrollBy({
+                top: 400,
+                behavior: 'smooth'
+            });
+
+            // 4. Wait for content to load
+            await delay(800);
+
+            // 5. Safety Break: Check if we reached bottom indefinitely
+            if (window.scrollY === lastScrollY) {
+                noScrollCount++;
+                if (noScrollCount > 5) {
+                    console.log('[Hunter] Reached bottom of page (no scroll change). Stopping.');
+                    break;
+                }
+            } else {
+                noScrollCount = 0;
+                lastScrollY = window.scrollY;
+            }
+
+            // Optional: Limit if maxItems is strict (user said "scrape all", but let's keep a sanity check if maxItems is very small)
+            // If maxItems is large (default), we just go until controller.
+            if (products.length >= maxItems && maxItems < 100) {
+                // Only respect maxItems if it's small/intentional, otherwise prefer getting everything
+                // But user asked to "scrape all of the products", so we mostly ignore maxItems unless it acts as a safety ceiling
             }
         }
 
-        console.log(`[Hunter] Main page scrape complete. Extracted ${products.length} products.`);
+        console.log(`[Hunter] Scrape complete. Total distinct products found: ${products.length}`);
         return products;
     }
 
@@ -257,7 +312,7 @@
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         switch (message.action) {
             case 'scrapeListings':
-                scrapeListings(message.maxItems || 20)
+                scrapeListings(message.maxItems || 1000)
                     .then(data => sendResponse({ success: true, data }))
                     .catch(err => sendResponse({ success: false, error: err.message }));
                 return true; // Keep channel open for async response
