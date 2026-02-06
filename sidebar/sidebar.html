@@ -73,11 +73,22 @@
 
     <!-- Input Area -->
     <footer class="input-area">
+      <div class="mode-toggle-wrapper">
+        <button id="mode-toggle-btn" class="mode-toggle-btn" title="Toggle Single Pick Mode">
+          <span class="mode-icon">🎯</span>
+          <span class="mode-label">Normal</span>
+        </button>
+      </div>
       <div class="input-wrapper">
         <textarea id="message-input" placeholder="Ask me to find products..." rows="1"></textarea>
         <button id="send-btn" class="send-btn" disabled>
           <svg viewBox="0 0 24 24">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+        <button id="stop-btn" class="stop-btn" style="display: none;">
+          <svg viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
           </svg>
         </button>
       </div>
@@ -99,7 +110,7 @@
           </button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
+          <div class="form-group" id="api-key-group">
             <label for="api-key-input">Gemini API Key</label>
             <div class="api-key-wrapper">
               <input type="password" id="api-key-input" placeholder="Enter your Gemini API key">
@@ -115,7 +126,7 @@
             </p>
           </div>
 
-          <div class="form-group">
+          <div class="form-group" id="serper-key-group">
             <label for="serper-key-input">Serper API Key</label>
             <div class="api-key-wrapper">
               <input type="password" id="serper-key-input" placeholder="Enter your Serper API key">
@@ -130,7 +141,7 @@
               Get your API key from <a href="https://serper.dev" target="_blank">Serper.dev</a>
             </p>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="model-group">
             <label for="model-select">AI Model</label>
             <select id="model-select" class="model-select">
               <option value="gemini-3-pro-preview">Gemini 3 Pro (Most Intelligent)</option>
@@ -141,6 +152,31 @@
               <option value="gemini-2.0-flash">Gemini 2.0 Flash (Legacy)</option>
             </select>
             <p class="form-hint">Select which Gemini model to use for responses</p>
+          </div>
+          <div class="form-group">
+            <label for="api-mode-select">API Mode</label>
+            <select id="api-mode-select" class="model-select">
+              <option value="native" selected>Native Gemini API (Official)</option>
+              <option value="web">Browser Web API (gemini.google.com)</option>
+            </select>
+            <p class="form-hint">"Web" mode automates the gemini.google.com website.</p>
+          </div>
+          <div class="form-group" id="gemini-url-group" style="display: none;">
+            <label for="gemini-url-input">Gemini Gem URL</label>
+            <input type="text" id="gemini-url-input" placeholder="https://gemini.google.com/u/0/gem/your-gem-id"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #1a1a2e; color: #fff;">
+            <p class="form-hint">
+              Paste your custom Gem URL. Example: <code>https://gemini.google.com/u/0/gem/abc123</code>
+            </p>
+          </div>
+          <div class="form-group" id="gemini-mode-group" style="display: none;">
+            <label for="gemini-mode-select">Gemini Mode</label>
+            <select id="gemini-mode-select" class="model-select">
+              <option value="fast" selected>⚡ Fast (Quick answers)</option>
+              <option value="thinking">🧠 Thinking (Complex problems)</option>
+              <option value="pro">💎 Pro (Advanced math & code)</option>
+            </select>
+            <p class="form-hint">Choose the Gemini processing mode. Pro mode thinks longer for better results.</p>
           </div>
           <button id="save-api-key" class="btn-primary">Save Settings</button>
         </div>

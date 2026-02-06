@@ -162,11 +162,15 @@ browser.runtime.onConnect.addListener((port) => {
                 ConnectionManager.setPort(tabId, port);
                 ConnectionManager.activeTabId = tabId;
 
-                // Send API key status
-                port.postMessage({ action: 'apiKey', hasKey: !!(await GeminiAPI.getApiKey()) });
-
-                // Send current model
-                port.postMessage({ action: 'currentModel', model: await GeminiAPI.getModel() });
+                // Send current settings
+                const settings = await browser.storage.local.get(['geminiModel', 'apiMode', 'geminiUrl', 'geminiMode']);
+                port.postMessage({
+                    action: 'currentSettings',
+                    model: settings.geminiModel,
+                    apiMode: settings.apiMode,
+                    geminiUrl: settings.geminiUrl,
+                    geminiMode: settings.geminiMode || 'fast'
+                });
 
                 // Send conversation history
                 const history = ConversationManager.getMessages(tabId);
@@ -245,6 +249,18 @@ async function handleSidebarMessage(message, port, tabId) {
                 // Always save model
                 if (message.model) {
                     await browser.storage.local.set({ geminiModel: message.model });
+                }
+                // Save API mode
+                if (message.apiMode) {
+                    await browser.storage.local.set({ apiMode: message.apiMode });
+                }
+                // Save Gemini URL if provided
+                if (message.geminiUrl) {
+                    await browser.storage.local.set({ geminiUrl: message.geminiUrl });
+                }
+                // Save Gemini Mode if provided
+                if (message.geminiMode) {
+                    await browser.storage.local.set({ geminiMode: message.geminiMode });
                 }
                 port.postMessage({ action: 'settingsSaved', success: true });
             } catch (error) {
@@ -327,6 +343,22 @@ async function handleSidebarMessage(message, port, tabId) {
             }
         }
     }
+
+    // Handle stop generation request
+    if (message.action === 'stopGeneration') {
+        console.log('[Background] Stop generation requested for tab:', tabId);
+        const conversation = ConversationManager.getOrCreate(tabId);
+        conversation.isProcessing = false;
+        conversation.abortRequested = true;
+
+        // If using Web API, try to abort it
+        if (typeof GeminiWebAPI !== 'undefined' && GeminiWebAPI.abortRequested !== undefined) {
+            GeminiWebAPI.abortRequested = true;
+        }
+
+        // Send stream end to cleanup UI
+        sendToSidebar(tabId, { action: 'streamEnd' });
+    }
 }
 
 // Process user message and get AI response
@@ -344,6 +376,7 @@ async function processUserMessage(text, tabId) {
     }
 
     conversation.isProcessing = true;
+    conversation.abortRequested = false; // Reset abort flag for new message
 
     // Tool usage tracker - enforce limits to prevent loops
     const toolUsage = {
@@ -382,8 +415,42 @@ async function processUserMessage(text, tabId) {
             });
         };
 
-        const messages = ConversationManager.getMessages(tabId);
-        let response = await GeminiAPI.sendMessage(messages, onChunk, onToolCall);
+        // Progress callback for multi-step tools like deep_scrape_urls
+        const onProgress = (current, total, toolName) => {
+            sendToSidebar(tabId, {
+                action: 'toolProgress',
+                name: toolName,
+                current,
+                total
+            });
+        };
+
+        // Tool result callback for when tools complete
+        const onToolResult = (toolName, success) => {
+            sendToSidebar(tabId, {
+                action: 'toolResult',
+                name: toolName,
+                success
+            });
+        };
+
+        let messages = ConversationManager.getMessages(tabId);
+
+        // Choose API based on settings
+        const settings = await browser.storage.local.get('apiMode');
+        let response;
+
+        if (settings.apiMode === 'web') {
+            // Use Browser Web API - pass progress and result callbacks for tool updates
+            response = await GeminiWebAPI.sendMessage(messages, onChunk, onToolCall, onProgress, onToolResult);
+            // Web API handles its own tool loop internally and returns finalized text/response
+            // But if we want to support the SAME tool loop logic here, we need GeminiWebAPI to return structure?
+            // Current GeminiWebAPI implementation handles the loop internally and returns { text: "final" }.
+            // So we just use that.
+        } else {
+            // Use Native API
+            response = await GeminiAPI.sendMessage(messages, onChunk, onToolCall);
+        }
 
         // Process tool calls with limits
         let loopCount = 0;
@@ -466,8 +533,23 @@ async function processUserMessage(text, tabId) {
 
             // 3. Get next step from AI using UPDATED history
             fullResponse = ''; // Reset buffer for next text
-            const currentMessages = ConversationManager.getMessages(tabId);
-            response = await GeminiAPI.sendMessage(currentMessages, onChunk, onToolCall);
+            messages = ConversationManager.getMessages(tabId);
+
+            // Choose API based on settings
+            // settings is already declared and fetched outside the loop, no need to redeclare or refetch
+            // let response; // response is already declared outside the loop
+
+            if (settings.apiMode === 'web') {
+                // Use Browser Web API
+                response = await GeminiWebAPI.sendMessage(messages, onChunk, onToolCall);
+                // Web API handles its own tool loop internally and returns finalized text/response
+                // But if we want to support the SAME tool loop logic here, we need GeminiWebAPI to return structure?
+                // Current GeminiWebAPI implementation handles the loop internally and returns { text: "final" }.
+                // So we just use that.
+            } else {
+                // Use Native API
+                response = await GeminiAPI.sendMessage(messages, onChunk, onToolCall);
+            }
         }
 
         if (loopCount >= MAX_LOOPS) {

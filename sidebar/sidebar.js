@@ -12,6 +12,7 @@
     const welcomeMessage = document.getElementById('welcome-message');
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
+    const stopBtn = document.getElementById('stop-btn');
     const fullscreenBtn = document.getElementById('fullscreen-btn');
     const clearBtn = document.getElementById('clear-btn');
     const settingsBtn = document.getElementById('settings-btn');
@@ -27,12 +28,14 @@
     const toolStatus = document.getElementById('tool-status');
     const toolStatusText = document.getElementById('tool-status-text');
     const suggestionChips = document.querySelectorAll('.suggestion-chip');
+    const modeToggleBtn = document.getElementById('mode-toggle-btn');
 
     // State
     let port = null;
     let isStreaming = false;
     let currentStreamingMessage = null;
     let tabId = null;
+    let singlePickMode = false; // Mode toggle state
 
     // Get tabId from URL query param
     function getTabIdFromUrl() {
@@ -78,6 +81,9 @@
             case 'streamStart':
                 isStreaming = true;
                 startStreamingMessage();
+                // Show stop button, hide send button
+                if (sendBtn) sendBtn.style.display = 'none';
+                if (stopBtn) stopBtn.style.display = 'flex';
                 break;
 
             case 'streamChunk':
@@ -87,11 +93,19 @@
             case 'streamEnd':
                 isStreaming = false;
                 finalizeStreamingMessage();
+                // Hide stop button, show send button
+                if (stopBtn) stopBtn.style.display = 'none';
+                if (sendBtn) sendBtn.style.display = 'flex';
                 break;
 
             case 'toolCall':
                 showToolStatus(`Using: ${formatToolName(message.name)}...`);
-                addToolBadge(message.name, 'executing');
+                // For deep_scrape_urls, add a special progress indicator
+                if (message.name === 'deep_scrape_urls') {
+                    addDeepScrapeProgress(message.args?.urls?.length || 0);
+                } else {
+                    addToolBadge(message.name, 'executing');
+                }
                 break;
 
             case 'toolExecuting':
@@ -101,13 +115,22 @@
             case 'toolProgress':
                 if (message.total > 0) {
                     showToolStatus(`${formatToolName(message.name)}: ${message.current}/${message.total}...`);
-                    // Update badge title too if possible
-                    updateToolBadgeTitle(message.name, `${formatToolName(message.name)} (${message.current}/${message.total})`);
+                    // Update deep scrape progress if applicable
+                    if (message.name === 'deep_scrape_urls') {
+                        updateDeepScrapeProgress(message.current, message.total);
+                    } else {
+                        updateToolBadgeTitle(message.name, `${formatToolName(message.name)} (${message.current}/${message.total})`);
+                    }
                 }
                 break;
 
             case 'toolResult':
-                updateToolBadge(message.name, 'complete');
+                // Complete the deep scrape progress indicator
+                if (message.name === 'deep_scrape_urls') {
+                    completeDeepScrapeProgress();
+                } else {
+                    updateToolBadge(message.name, 'complete');
+                }
                 showToolStatus(`Done: ${formatToolName(message.name)}`);
                 setTimeout(hideToolStatus, 1500);
                 break;
@@ -116,6 +139,9 @@
                 hideToolStatus();
                 addErrorMessage(message.message);
                 isStreaming = false;
+                // Reset button visibility
+                if (stopBtn) stopBtn.style.display = 'none';
+                if (sendBtn) sendBtn.style.display = 'flex';
                 break;
 
             case 'conversationHistory':
@@ -154,12 +180,28 @@
                 }
                 break;
 
-            case 'currentModel':
-                // Set the dropdown to current model
-                const modelSelect = document.getElementById('model-select');
-                if (modelSelect && message.model) {
-                    modelSelect.value = message.model;
+                break;
+
+            case 'currentSettings':
+                // Set all settings fields
+                if (message.model) {
+                    const modelSelect = document.getElementById('model-select');
+                    if (modelSelect) modelSelect.value = message.model;
                 }
+                if (message.apiMode) {
+                    const modeSelect = document.getElementById('api-mode-select');
+                    if (modeSelect) modeSelect.value = message.apiMode;
+                }
+                if (message.geminiUrl) {
+                    const geminiUrlInput = document.getElementById('gemini-url-input');
+                    if (geminiUrlInput) geminiUrlInput.value = message.geminiUrl;
+                }
+                if (message.geminiMode) {
+                    const geminiModeSelect = document.getElementById('gemini-mode-select');
+                    if (geminiModeSelect) geminiModeSelect.value = message.geminiMode;
+                }
+                // Update visibility based on mode
+                updateSettingsVisibility(message.apiMode || 'native');
                 break;
 
             case 'testToolResult':
@@ -227,6 +269,16 @@
     // Append to streaming message
     function appendToStreamingMessage(chunk) {
         if (!currentStreamingMessage) return;
+
+        // Handle clear signal - reset content to remove "Processing..." etc.
+        if (chunk === '__CLEAR__') {
+            currentStreamingMessage.content = '';
+            const textContent = currentStreamingMessage.div.querySelector('.text-content');
+            if (textContent) {
+                textContent.innerHTML = '';
+            }
+            return;
+        }
 
         currentStreamingMessage.content += chunk;
         const textContent = currentStreamingMessage.div.querySelector('.text-content');
@@ -306,7 +358,81 @@
         }
     }
 
+    // Add deep scrape progress indicator
+    function addDeepScrapeProgress(totalUrls) {
+        const progressDiv = document.createElement('div');
+        progressDiv.className = 'deep-scrape-progress';
+        progressDiv.id = 'deep-scrape-progress';
+        progressDiv.innerHTML = `
+            <div class="progress-header">
+                <span>🔍 DeepScrape V9</span>
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="progress-text">Initializing... (0/${totalUrls} sites)</div>
+        `;
 
+        if (currentStreamingMessage) {
+            currentStreamingMessage.hasTools = true;
+            const toolContent = currentStreamingMessage.div.querySelector('.tool-content');
+            if (toolContent) {
+                toolContent.appendChild(progressDiv);
+            } else {
+                currentStreamingMessage.div.querySelector('.message-content').appendChild(progressDiv);
+            }
+        } else {
+            chatContainer.appendChild(progressDiv);
+        }
+        scrollToBottom();
+    }
+
+    // Update deep scrape progress
+    function updateDeepScrapeProgress(current, total) {
+        const progressDiv = document.getElementById('deep-scrape-progress');
+        if (!progressDiv) return;
+
+        const percentage = Math.round((current / total) * 100);
+        const remaining = total - current;
+
+        const progressFill = progressDiv.querySelector('.progress-fill');
+        const progressText = progressDiv.querySelector('.progress-text');
+
+        if (progressFill) {
+            progressFill.style.width = `${percentage}%`;
+        }
+        if (progressText) {
+            progressText.textContent = `Scraping site ${current}/${total} (${remaining} remaining)`;
+        }
+    }
+
+    // Complete deep scrape progress
+    function completeDeepScrapeProgress() {
+        const progressDiv = document.getElementById('deep-scrape-progress');
+        if (!progressDiv) return;
+
+        const progressFill = progressDiv.querySelector('.progress-fill');
+        const progressText = progressDiv.querySelector('.progress-text');
+        const header = progressDiv.querySelector('.progress-header');
+
+        if (progressFill) {
+            progressFill.style.width = '100%';
+            progressFill.style.background = 'linear-gradient(90deg, #10B981, #34d399)';
+        }
+        if (progressText) {
+            progressText.textContent = '✓ All sites scraped successfully!';
+        }
+        if (header) {
+            header.style.color = '#10B981';
+            const svg = header.querySelector('svg');
+            if (svg) svg.style.animation = 'none';
+        }
+
+        progressDiv.style.borderColor = '#10B981';
+    }
     // Add error message
     function addErrorMessage(error) {
         const errorDiv = document.createElement('div');
@@ -348,18 +474,54 @@
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+        // Markdown links [text](url)
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="product-link">$1</a>');
+
+        // Auto-detect bare URLs and convert to clickable links
+        // Regex improvement: Stop matching at whitespace, quotes, or common punctuation followed by space
+        html = html.replace(
+            /(?<!href="|">)(https?:\/\/[^\s<>"]+?)(?=[\s,)]|(\.\s)|$)/g,
+            (match) => {
+                // Determine if it looks like a Shopee product URL
+                if (match.includes('shopee.co.id')) {
+                    // Try to get product name from URL
+                    // Improved regex to handle various shopee URL patterns and avoid capturing trailing chars
+                    const productMatch = match.match(/shopee\.co\.id\/([^\?#]+)/);
+                    let productName = 'View Product';
+
+                    if (productMatch && productMatch[1]) {
+                        // Clean up the slug: remove IDs at the end if possible, replace hyphens with spaces
+                        let slug = productMatch[1];
+                        // Remove the shop ID/item ID suffix usually found like: name-of-product-i.123.456
+                        slug = slug.replace(/-i\.\d+\.\d+.*$/, '');
+                        productName = slug.replace(/-/g, ' ').substring(0, 40) + '...';
+                    }
+
+                    return `<a href="${match}" target="_blank" class="product-link shopee-link">🛒 ${productName}</a>`;
+                }
+
+                // Generic URL
+                const displayUrl = match.length > 50 ? match.substring(0, 47) + '...' : match;
+                return `<a href="${match}" target="_blank" class="external-link">🔗 ${displayUrl}</a>`;
+            }
+        );
+
         html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
         html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-        html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
         html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-        html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
-        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-        html = html.replace(/\n\n/g, '</p><p>');
+        html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+        // Wrap lists
+        html = html.replace(/(<li>[\s\S]+?<\/li>)/g, '<ul>$1</ul>');
+        // Fix double wrapping of lists if they were adjacent
+        html = html.replace(/<\/ul><ul>/g, '');
+
+        // Convert newlines to breaks, but ignore newlines inside pre/code tags or around headers/lists
+        // Simplest approach: Replace double newlines with paragraph breaks, single with br
+        html = html.replace(/\n\n/g, '<br><br>');
         html = html.replace(/\n/g, '<br>');
-        html = '<p>' + html + '</p>';
-        html = html.replace(/<p><\/p>/g, '');
 
         return html;
     }
@@ -399,8 +561,13 @@
 
     // Send message
     function sendMessage() {
-        const text = messageInput.value.trim();
+        let text = messageInput.value.trim();
         if (!text || isStreaming || !port) return;
+
+        // Append single pick mode tag if active
+        if (singlePickMode) {
+            text = text + ' {Single_pick_mode}';
+        }
 
         port.postMessage({
             action: 'sendMessage',
@@ -424,6 +591,30 @@
     function openSettingsModal() { settingsModal.classList.add('visible'); }
     function closeSettingsModal() { settingsModal.classList.remove('visible'); }
 
+    // Show/hide native-only settings based on API mode
+    function updateSettingsVisibility(mode) {
+        const apiKeyGroup = document.getElementById('api-key-group');
+        const modelGroup = document.getElementById('model-group');
+        const geminiUrlGroup = document.getElementById('gemini-url-group');
+        const serperKeyGroup = document.getElementById('serper-key-group');
+        const geminiModeGroup = document.getElementById('gemini-mode-group');
+        const isWeb = mode === 'web';
+
+        // Hide API key, model, and Serper key for Web mode (uses native Google Search)
+        if (apiKeyGroup) apiKeyGroup.style.display = isWeb ? 'none' : 'block';
+        if (modelGroup) modelGroup.style.display = isWeb ? 'none' : 'block';
+        if (serperKeyGroup) serperKeyGroup.style.display = isWeb ? 'none' : 'block';
+        if (geminiUrlGroup) geminiUrlGroup.style.display = isWeb ? 'block' : 'none';
+        // Show Gemini Mode selector only in Web mode
+        if (geminiModeGroup) geminiModeGroup.style.display = isWeb ? 'block' : 'none';
+    }
+
+    // Attach mode change event
+    const apiModeSelect = document.getElementById('api-mode-select');
+    if (apiModeSelect) {
+        apiModeSelect.addEventListener('change', (e) => updateSettingsVisibility(e.target.value));
+    }
+
     function toggleApiKeyVisibility() {
         apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
     }
@@ -439,6 +630,10 @@
         const serperKey = serperKeyInput.value.trim();
         const modelSelect = document.getElementById('model-select');
         const model = modelSelect?.value || 'gemini-2.5-flash';
+        const geminiUrlInput = document.getElementById('gemini-url-input');
+        const geminiUrl = geminiUrlInput?.value.trim();
+        const geminiModeSelect = document.getElementById('gemini-mode-select');
+        const geminiMode = geminiModeSelect?.value || 'fast';
 
         // Send settings to background
         port.postMessage({
@@ -446,6 +641,9 @@
             apiKey: apiKey || null,  // null if empty (don't overwrite existing)
             serperKey: serperKey || null,
             model: model,
+            apiMode: document.getElementById('api-mode-select')?.value || 'native',
+            geminiUrl: geminiUrl || null,
+            geminiMode: geminiMode,
             tabId
         });
 
@@ -475,6 +673,28 @@
     });
 
     sendBtn.addEventListener('click', sendMessage);
+
+    // Stop button - abort generation
+    if (stopBtn) {
+        stopBtn.addEventListener('click', () => {
+            if (port) {
+                port.postMessage({ action: 'stopGeneration', tabId });
+            }
+            // Reset UI immediately
+            isStreaming = false;
+            stopBtn.style.display = 'none';
+            sendBtn.style.display = 'flex';
+            hideToolStatus();
+            // Add a "stopped" message
+            if (currentStreamingMessage) {
+                const textContent = currentStreamingMessage.div.querySelector('.text-content');
+                if (textContent) {
+                    textContent.innerHTML += '<br><em style="color: var(--warning);">⏹️ Generation stopped by user</em>';
+                }
+                finalizeStreamingMessage();
+            }
+        });
+    }
     if (fullscreenBtn) {
         fullscreenBtn.addEventListener('click', async () => {
             try {
@@ -504,6 +724,18 @@
     settingsModal.addEventListener('click', (e) => {
         if (e.target === settingsModal) closeSettingsModal();
     });
+
+    // Mode Toggle Button
+    if (modeToggleBtn) {
+        modeToggleBtn.addEventListener('click', () => {
+            singlePickMode = !singlePickMode;
+            modeToggleBtn.classList.toggle('active', singlePickMode);
+            const label = modeToggleBtn.querySelector('.mode-label');
+            if (label) {
+                label.textContent = singlePickMode ? 'Single' : 'Normal';
+            }
+        });
+    }
 
     // ============ DYNAMIC SUGGESTIONS ============
     const SUGGESTION_POOL = [

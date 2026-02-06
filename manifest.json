@@ -16,11 +16,14 @@
     "tabs",
     "windows",
     "*://*.shopee.co.id/*",
-    "*://*.shopee.com/*"
+    "*://*.shopee.com/*",
+    "https://gemini.google.com/*"
   ],
   "background": {
     "scripts": [
+      "lib/instructions.js",
       "lib/gemini.js",
+      "lib/gemini-web.js",
       "lib/deep-scrape-manager.js",
       "lib/tools.js",
       "background.js"
@@ -39,6 +42,15 @@
       ],
       "css": [
         "content.css"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "lib/gemini-content.js"
       ],
       "run_at": "document_end"
     }

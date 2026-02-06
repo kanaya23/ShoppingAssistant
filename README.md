@@ -1,76 +1,100 @@
-# Shopee Shopping Assistant - Firefox Extension
+# Shopee Shopping Assistant (AI Agent)
 
-An AI-powered shopping assistant for Shopee Indonesia, featuring Gemini AI with agentic tool capabilities.
+![Version](https://img.shields.io/badge/version-1.0.2-blue) ![Platform](https://img.shields.io/badge/platform-Firefox-orange)
 
-## Features
+A powerful, AI-driven shopping assistant for Shopee Indonesia. This extension transforms your shopping experience by deploying an autonomous AI agent that can search, scrape, analyze, and validate product information using **Gemini AI** and **Serper (Google Search)**.
 
-- 🛒 **AI Shopping Assistant**: Natural language interactions to find products
-- 🔍 **Smart Search**: AI can search Shopee based on your requirements
-- 📊 **Product Analysis**: Scrapes and compares listings automatically
-- 💎 **Premium UI**: Dark glassmorphism design with smooth animations
-- ⚡ **Streaming**: Real-time AI responses with typing indicators
+---
 
-## Installation
+## ⚡ Key Features
 
-### Firefox Developer Edition / Nightly
+### 🤖 Autonomous Agentic Workflow
+Unlike simple chatbots, this assistant acts as an agent. It plans its own actions:
+1.  **Refines Queries**: Converts vague requests into specific Shopee search terms.
+2.  **Scrapes Listings**: Extracts product data from search results.
+3.  **Deep Analysis**: Autonomously visits product pages to fetch **hidden details** like variation prices, full descriptions, and review statistics.
+4.  **External Validation**: Uses Serper (Google Search) to cross-reference product reviews, specs, and price history from the wider web.
 
-1. Open Firefox and navigate to `about:debugging`
-2. Click "This Firefox" in the left sidebar
-3. Click "Load Temporary Add-on..."
-4. Navigate to this folder and select `manifest.json`
-5. The extension will be installed temporarily
+### 🧠 Smart & Deep Scraping
+The custom "Deep Scraper V9" engine goes beyond basic page text:
+-   **Variation Intelligence**: Automatically clicks through product variants (color/size) to extract real pricing (not just the range).
+-   **Review Analysis**: Captures reviews from all star categories (1-5 stars) to detect hidden flaws.
+-   **Skeptical Analysis**: The AI is instructed to be skeptical—it flags suspicious review patterns, generic descriptions, or "too good to be true" deals.
 
-### Firefox (Permanent Installation)
+### 💬 Dual Chat Modes
+Tailor the AI's behavior to your needs with a dedicated toggle:
+-   **Normal Mode**: Conversational and helpful for general exploration and advice.
+-   **Single Pick Mode**: Appends a rigorous selection instruction (`{Single_pick_mode}`) to ensure the AI narrows down to the **single best recommendation** with definitive reasoning.
 
-1. Package the extension: `zip -r shopee-assistant.xpi *`
-2. Go to `about:addons` → Settings (gear icon) → "Install Add-on From File..."
-3. Select the `.xpi` file
+### �️ Premium User Interface
+-   **Dark Glassmorphism UI**: A modern, sleek sidebar that fits perfectly with dark themes.
+-   **Fullscreen Mode**: Expand the chat to a full window for complex research sessions.
+-   **Real-time Streaming**: Watch the AI "think" and execute tools in real-time.
 
-## Setup
+---
 
-1. After installation, click the extension icon or the floating button on Shopee
-2. Click the settings (⚙️) icon in the sidebar header
-3. Enter your Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
-4. Click "Save API Key"
+## 📥 Installation
 
-## Usage
+### Option A: Temporary (Developer Mode)
+Use this for testing or development.
+1.  Open Firefox and go to `about:debugging`.
+2.  Select **"This Firefox"** in the sidebar.
+3.  Click **"Load Temporary Add-on..."**.
+4.  Navigate to this folder and select `manifest.json`.
 
-Navigate to [shopee.co.id](https://shopee.co.id) and:
+### Option B: Permanent Installation
+1.  Zip the project files: `zip -r shopee-assistant.xpi *`
+2.  Open Firefox and go to `about:addons`.
+3.  Click the **Settings (gear icon)** ⚙️ → **"Install Add-on From File..."**.
+4.  Select your generated `.xpi` file.
 
-1. Click the floating button (bottom-left) to open the assistant
-2. Ask questions like:
-   - "Find me the best screwdriver set under 100k"
-   - "Compare wireless earbuds with good reviews"
-   - "What are the top-rated phone cases?"
-3. The AI will search, scrape listings, and provide recommendations
+---
 
-## File Structure
+## ⚙️ Configuration
+
+To unlock the full potential of the assistant, you need to configure your API keys in the settings menu:
+
+1.  **Gemini API Key** (Required):
+    -   Get it for free at [Google AI Studio](https://aistudio.google.com/apikey).
+    -   Enables the core intelligence of the assistant.
+2.  **Serper API Key** (Recommended):
+    -   Get it at [Serper.dev](https://serper.dev/).
+    -   Enables "Google Search" capabilities for external validation (reviews, specs, reddit discussions).
+
+> **Note**: Without Serper, the assistant uses internal knowledge only and cannot browse the web outside of Shopee.
+
+---
+
+## 🚀 Usage Guide
+
+1.  **Open the Assistant**: Click the floating button on any Shopee.co.id page or use the extension icon.
+2.  **Set Your Mode**: Toggle "Single" mode if you want a decisive recommendation, or "Normal" for discussion.
+3.  **Ask Anything**:
+    -   *"Find me a mechanical keyboard under 500k with red switches."*
+    -   *"Compare the Redmi Note 13 vs Infinix Note 40 from official stores."*
+    -   *"Is this shop trustworthy? Analyze the 1-star reviews."*
+4.  **Watch it Work**:
+    -   The AI will navigate Shopee, scrape pages, and (if enabled) search Google.
+    -   It will present a final report with clear pros/cons and a recommendation.
+
+---
+
+## 📂 Project Structure
 
 ```
 ShoppingAssistant/
-├── manifest.json        # Extension manifest
-├── background.js        # Background service worker
-├── content.js           # Content script for Shopee pages
-├── content.css          # Floating button styles
+├── background.js           # Central orchestra (Service Worker)
+├── content.js              # Shopee page interactor
 ├── lib/
-│   ├── gemini.js        # Gemini API integration
-│   └── tools.js         # Shopping tool implementations
+│   ├── gemini.js           # Gemini API Client
+│   ├── tools.js            # Tool Execution Logic (Search, Scrape, Serper)
+│   ├── deep-scraper.js     # V9 Product Page Scraper
+│   └── deep-scrape-manager.js # Tab management for scraping
 ├── sidebar/
-│   ├── sidebar.html     # Sidebar UI structure
-│   ├── sidebar.css      # Premium dark theme styles
-│   └── sidebar.js       # Sidebar logic
-└── icons/
-    ├── icon-16.png
-    ├── icon-32.png
-    ├── icon-48.png
-    └── icon-128.png
+│   ├── sidebar.js          # UI Logic & State Management
+│   └── sidebar.css         # Glassmorphism Styling
+└── manifest.json           # Extension Configuration
 ```
 
-## Requirements
-
-- Firefox 109+ (for Manifest V2 sidebar support)
-- Gemini API key (free tier available)
-
-## License
-
+## 📄 License
 MIT License
