@@ -538,12 +538,31 @@
     // ============================================================================
     function sendMessage() {
         let text = messageInput.value.trim();
-        if (!text || isStreaming || !socket?.connected) return;
+
+        // Debug logging
+        console.log('[UI] sendMessage called');
+        console.log('[UI] text:', text);
+        console.log('[UI] socket:', socket);
+        console.log('[UI] socket.connected:', socket?.connected);
+        console.log('[UI] isStreaming:', isStreaming);
+        console.log('[UI] sessionId:', sessionId);
+
+        if (!text || isStreaming) {
+            console.log('[UI] Blocked: no text or streaming');
+            return;
+        }
+
+        if (!socket || !socket.connected) {
+            console.log('[UI] Blocked: socket not connected');
+            addErrorMessage('Not connected to server. Please refresh the page.');
+            return;
+        }
 
         if (singlePickMode) {
             text = text + ' {Single_pick_mode}';
         }
 
+        console.log('[UI] Emitting send_message:', { session_id: sessionId, text });
         socket.emit('send_message', {
             session_id: sessionId,
             text: text
