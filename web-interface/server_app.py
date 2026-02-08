@@ -113,6 +113,14 @@ class ConnectionManager:
                     'last_activity': time.time()
                 }
             return self.conversations[session_id]
+            
+    def get_sid_for_session(self, session_id):
+        """Get the current socket ID for a given session ID."""
+        with self.lock:
+            for sid, info in self.web_clients.items():
+                if info['session_id'] == session_id:
+                    return sid
+        return None
     
     def add_message(self, session_id, role, content, parts=None):
         conv = self.get_conversation(session_id)
@@ -528,12 +536,20 @@ def handle_send_message(data):
         try:
             result = route_message_via_extension(text, session_id, request.sid)
             if result.get('error'):
-                emit('error', {'message': result['error']})
+                web_sid = manager.get_sid_for_session(session_id)
+                if web_sid:
+                    socketio.emit('error', {'message': result['error']}, room=web_sid)
         except Exception as e:
-            emit('error', {'message': str(e)})
+            web_sid = manager.get_sid_for_session(session_id)
+            if web_sid:
+                socketio.emit('error', {'message': str(e)}, room=web_sid)
         finally:
             conv['processing'] = False
-            emit('stream_end')
+            
+            # Send stream_end to current SID (handle reconnects)
+            web_sid = manager.get_sid_for_session(session_id)
+            if web_sid:
+                socketio.emit('stream_end', room=web_sid)
         return
     
     # Otherwise use server-side Gemini API
@@ -728,41 +744,56 @@ def handle_ai_stream_chunk(data):
     request_id = data.get('request_id')
     chunk = data.get('chunk', '')
     
-    print(f'[WS] ai_stream_chunk received: request_id={request_id}, chunk_len={len(chunk)}')  # DEBUG
+    # print(f'[WS] ai_stream_chunk received: request_id={request_id}, chunk_len={len(chunk)}')  # DEBUG
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
             req = pending_ai_requests[request_id]
-            web_sid = req['web_client_sid']
             session_id = req['session_id']
+            
+            # Use dynamic SID lookup to handle reconnects
+            web_sid = manager.get_sid_for_session(session_id)
             
             # Store chunk in conversation state
             manager.append_stream_chunk(session_id, chunk)
             
-            print(f'[WS] Relaying chunk to web client: {web_sid}')  # DEBUG
-            socketio.emit('stream_chunk', {'chunk': chunk}, room=web_sid)
-        else:
-            print(f'[WS] No pending request found for: {request_id}')  # DEBUG
+            if web_sid:
+                # print(f'[WS] Relaying chunk to web client: {web_sid}')  # DEBUG
+                socketio.emit('stream_chunk', {'chunk': chunk}, room=web_sid)
+        # else:
+            # print(f'[WS] No pending request found for: {request_id}')  # DEBUG
 
 @socketio.on('ai_tool_call')
 def handle_ai_tool_call(data):
     """Relay AI tool calls from extension to web client."""
     request_id = data.get('request_id')
     tool_name = data.get('name')
+    tool_args = data.get('args', {})
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
             req = pending_ai_requests[request_id]
-            web_sid = req['web_client_sid']
             session_id = req['session_id']
+            
+            # Use dynamic SID lookup
+            web_sid = manager.get_sid_for_session(session_id)
             
             # Update progress state to 'starting tool'
             manager.update_progress(session_id, tool_name, 0, 0)
             
-            socketio.emit('tool_call', {
-                'name': tool_name,
-                'args': data.get('args', {})
-            }, room=web_sid)
+            # Save tool call to history so it persists on reload
+            manager.add_message(session_id, 'assistant', '', parts=[{
+                'functionCall': {
+                    'name': tool_name,
+                    'args': tool_args
+                }
+            }])
+            
+            if web_sid:
+                socketio.emit('tool_call', {
+                    'name': tool_name,
+                    'args': tool_args
+                }, room=web_sid)
 
 @socketio.on('ai_tool_executing')
 def handle_ai_tool_executing(data):
@@ -771,23 +802,42 @@ def handle_ai_tool_executing(data):
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            web_sid = pending_ai_requests[request_id]['web_client_sid']
-            socketio.emit('tool_executing', {'name': data.get('name')}, room=web_sid)
+            req = pending_ai_requests[request_id]
+            session_id = req['session_id']
+            web_sid = manager.get_sid_for_session(session_id)
+            
+            if web_sid:
+                socketio.emit('tool_executing', {'name': data.get('name')}, room=web_sid)
 
 @socketio.on('ai_tool_result')
 def handle_ai_tool_result(data):
     """Relay tool results from extension to web client."""
     request_id = data.get('request_id')
+    tool_name = data.get('name')
+    result = data.get('result', {})
     
-    print(f'[WS] ai_tool_result: {data.get("name")}')  # DEBUG
+    # print(f'[WS] ai_tool_result: {data.get("name")}')  # DEBUG
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            web_sid = pending_ai_requests[request_id]['web_client_sid']
-            socketio.emit('tool_result', {
-                'name': data.get('name'),
-                'success': data.get('success', False)
-            }, room=web_sid)
+            req = pending_ai_requests[request_id]
+            session_id = req['session_id']
+            web_sid = manager.get_sid_for_session(session_id)
+            
+            # Save tool result to history
+            manager.add_message(session_id, 'user', '', parts=[{
+                'functionResponse': {
+                    'name': tool_name,
+                    'response': result
+                }
+            }])
+            
+            if web_sid:
+                socketio.emit('tool_result', {
+                    'name': tool_name,
+                    'result': result,  # Forward result to client if needed
+                    'success': data.get('success', False)
+                }, room=web_sid)
 
 @socketio.on('ai_tool_progress')
 def handle_ai_tool_progress(data):
@@ -798,23 +848,25 @@ def handle_ai_tool_progress(data):
     total = data.get('total')
     url = data.get('url')
     
-    print(f'[WS] ai_tool_progress: {tool_name} {current}/{total} - {url[:50] if url else "no url"}')  # DEBUG
+    # print(f'[WS] ai_tool_progress: {tool_name} {current}/{total} - {url[:50] if url else "no url"}')  # DEBUG
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
             req = pending_ai_requests[request_id]
-            web_sid = req['web_client_sid']
+            # web_sid = req['web_client_sid'] # OLD
             session_id = req['session_id']
+            web_sid = manager.get_sid_for_session(session_id) # NEW
             
             # Store progress state
             manager.update_progress(session_id, tool_name, current, total, url)
             
-            socketio.emit('tool_progress', {
-                'name': tool_name,
-                'current': current,
-                'total': total,
-                'url': url
-            }, room=web_sid)
+            if web_sid:
+                socketio.emit('tool_progress', {
+                    'name': tool_name,
+                    'current': current,
+                    'total': total,
+                    'url': url
+                }, room=web_sid)
 
 @socketio.on('ai_response_complete')
 def handle_ai_response_complete(data):
