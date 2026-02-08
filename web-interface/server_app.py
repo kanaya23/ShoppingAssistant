@@ -10,6 +10,10 @@ Features:
 - Routes tool calls to connected browser extension
 """
 
+# CRITICAL: Monkey patch must happen FIRST before any other imports!
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import json
 import time
@@ -380,10 +384,15 @@ def handle_register_extension(data):
 @socketio.on('send_message')
 def handle_send_message(data):
     """Handle user message from web client."""
+    print(f'[WS] Received send_message: {data}')  # DEBUG
+    
     session_id = data.get('session_id')
     text = data.get('text', '').strip()
     
+    print(f'[WS] session_id={session_id}, text={text[:50] if text else "empty"}...')  # DEBUG
+    
     if not text or not session_id:
+        print('[WS] Blocked: missing text or session_id')  # DEBUG
         return
     
     conv = manager.get_conversation(session_id)
