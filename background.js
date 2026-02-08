@@ -780,6 +780,12 @@ const RemoteConnectionManager = {
                 // Route AI message through extension's conversation system
                 await this.processAIMessage(data);
                 break;
+
+            case 'ping_from_server':
+                // Respond to ping test immediately
+                console.log('[Remote] Ping received from server, sending pong');
+                this.emit('pong_from_extension', { request_id: data.request_id });
+                break;
         }
     },
 
@@ -880,7 +886,10 @@ const RemoteConnectionManager = {
     emit(eventName, data) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             const message = JSON.stringify([eventName, data]);
+            console.log('[Remote] Emitting:', eventName, data?.chunk?.substring?.(0, 50) || data);
             this.socket.send('42' + message);
+        } else {
+            console.warn('[Remote] Cannot emit, socket not open:', eventName);
         }
     },
 

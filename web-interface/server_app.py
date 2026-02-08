@@ -381,6 +381,49 @@ def handle_register_extension(data):
     emit('registered', {'status': 'ok'})
     print(f'[WS] Extension registered: tab={tab_id}')
 
+# Ping/Pong test for debugging connection
+pending_pings = {}
+
+@socketio.on('test_ping')
+def handle_test_ping(data):
+    """Handle ping test from web client."""
+    session_id = data.get('session_id')
+    timestamp = data.get('timestamp')
+    
+    print(f'[WS] Test ping received from web client: session={session_id}')
+    
+    if not manager.has_extension():
+        emit('pong_response', {'message': 'No extension connected!', 'error': True})
+        return
+    
+    # Store pending ping
+    request_id = str(uuid.uuid4())
+    pending_pings[request_id] = {
+        'web_client_sid': request.sid,
+        'timestamp': timestamp
+    }
+    
+    # Forward to extension
+    ext_sid = manager.get_active_extension()
+    socketio.emit('ping_from_server', {'request_id': request_id}, room=ext_sid)
+    print(f'[WS] Ping forwarded to extension: {ext_sid}')
+
+@socketio.on('pong_from_extension')
+def handle_pong_from_extension(data):
+    """Handle pong response from extension."""
+    request_id = data.get('request_id')
+    
+    print(f'[WS] Pong received from extension: request_id={request_id}')
+    
+    if request_id in pending_pings:
+        web_sid = pending_pings[request_id]['web_client_sid']
+        del pending_pings[request_id]
+        
+        socketio.emit('pong_response', {
+            'message': 'PONG from extension! 🏓 Full round-trip successful!'
+        }, room=web_sid)
+        print(f'[WS] Pong relayed to web client: {web_sid}')
+
 @socketio.on('send_message')
 def handle_send_message(data):
     """Handle user message from web client."""
@@ -620,10 +663,15 @@ def handle_ai_stream_chunk(data):
     request_id = data.get('request_id')
     chunk = data.get('chunk', '')
     
+    print(f'[WS] ai_stream_chunk received: request_id={request_id}, chunk_len={len(chunk)}')  # DEBUG
+    
     with ai_request_lock:
         if request_id in pending_ai_requests:
             web_sid = pending_ai_requests[request_id]['web_client_sid']
+            print(f'[WS] Relaying chunk to web client: {web_sid}')  # DEBUG
             socketio.emit('stream_chunk', {'chunk': chunk}, room=web_sid)
+        else:
+            print(f'[WS] No pending request found for: {request_id}')  # DEBUG
 
 @socketio.on('ai_tool_call')
 def handle_ai_tool_call(data):

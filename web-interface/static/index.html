@@ -71,7 +71,7 @@
         </div>
         <div class="extension-notice" id="extension-notice">
           <svg viewBox="0 0 24 24">
-            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
           </svg>
           <span>For full Shopee scraping features, connect the browser extension.</span>
         </div>
@@ -146,6 +146,15 @@
             <div class="session-info">
               <code id="session-id">Loading...</code>
             </div>
+          </div>
+          <div class="form-group">
+            <label>Test Connection</label>
+            <button id="test-ping-btn" class="test-btn"
+              style="padding: 10px 20px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">
+              🏓 Send Test Ping
+            </button>
+            <p class="form-hint" id="ping-result" style="margin-top: 8px;">Press to test full message round-trip to
+              extension.</p>
           </div>
         </div>
         <div class="modal-footer">

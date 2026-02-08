@@ -683,6 +683,52 @@
         });
     }
 
+    // Test Ping Button
+    const testPingBtn = document.getElementById('test-ping-btn');
+    const pingResult = document.getElementById('ping-result');
+
+    if (testPingBtn) {
+        testPingBtn.addEventListener('click', () => {
+            if (!socket?.connected) {
+                pingResult.textContent = '❌ Not connected to server';
+                pingResult.style.color = '#ef4444';
+                return;
+            }
+
+            pingResult.textContent = '⏳ Sending ping to extension...';
+            pingResult.style.color = '#f59e0b';
+
+            const pingTime = Date.now();
+
+            // Listen for pong response
+            const pongHandler = (data) => {
+                const latency = Date.now() - pingTime;
+                pingResult.textContent = `✅ Pong received! Round-trip: ${latency}ms`;
+                pingResult.style.color = '#10b981';
+
+                // Also add a message to chat as proof
+                hideWelcome();
+                addMessage(`🏓 Ping test successful! Response: "${data.message}" (${latency}ms)`, 'assistant');
+
+                socket.off('pong_response', pongHandler);
+            };
+
+            socket.on('pong_response', pongHandler);
+
+            // Send ping
+            socket.emit('test_ping', { session_id: sessionId, timestamp: pingTime });
+
+            // Timeout after 10 seconds
+            setTimeout(() => {
+                socket.off('pong_response', pongHandler);
+                if (pingResult.textContent.includes('Sending')) {
+                    pingResult.textContent = '❌ Timeout - no response from extension';
+                    pingResult.style.color = '#ef4444';
+                }
+            }, 10000);
+        });
+    }
+
     // ============================================================================
     // INITIALIZE
     // ============================================================================
