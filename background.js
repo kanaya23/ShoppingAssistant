@@ -646,8 +646,8 @@ browser.windows.onRemoved.addListener((windowId) => {
 
 const RemoteConnectionManager = {
     socket: null,
-    // Include port 5000 by default
-    serverUrl: 'wss://mullion.indonesiacentral.cloudapp.azure.com:5000',
+    // Use ws:// (non-SSL) for easier setup - change to wss:// if using proper SSL certs
+    serverUrl: 'ws://mullion.indonesiacentral.cloudapp.azure.com:5000',
     isConnected: false,
     reconnectAttempts: 0,
     maxReconnectAttempts: Infinity,
