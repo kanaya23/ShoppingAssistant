@@ -819,7 +819,10 @@ const RemoteConnectionManager = {
                 this.emit('ai_stream_chunk', { request_id, chunk });
             };
 
-            const onToolCall = (toolName, args) => {
+            const onToolCall = (toolCallData) => {
+                // GeminiWebAPI passes { name, args } object
+                const toolName = toolCallData.name || toolCallData;
+                const args = toolCallData.args || {};
                 console.log('[Remote] onToolCall callback:', toolName, args);
                 this.emit('ai_tool_call', { request_id, name: toolName, args });
             };
