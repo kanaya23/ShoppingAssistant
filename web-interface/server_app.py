@@ -701,12 +701,32 @@ def handle_ai_tool_result(data):
     """Relay tool results from extension to web client."""
     request_id = data.get('request_id')
     
+    print(f'[WS] ai_tool_result: {data.get("name")}')  # DEBUG
+    
     with ai_request_lock:
         if request_id in pending_ai_requests:
             web_sid = pending_ai_requests[request_id]['web_client_sid']
             socketio.emit('tool_result', {
                 'name': data.get('name'),
                 'success': data.get('success', False)
+            }, room=web_sid)
+
+@socketio.on('ai_tool_progress')
+def handle_ai_tool_progress(data):
+    """Relay tool progress (e.g., deep scrape) from extension to web client."""
+    request_id = data.get('request_id')
+    url = data.get('url')
+    
+    print(f'[WS] ai_tool_progress: {data.get("name")} {data.get("current")}/{data.get("total")} - {url[:50] if url else "no url"}')  # DEBUG
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('tool_progress', {
+                'name': data.get('name'),
+                'current': data.get('current'),
+                'total': data.get('total'),
+                'url': url  # Include URL being scraped
             }, room=web_sid)
 
 @socketio.on('ai_response_complete')

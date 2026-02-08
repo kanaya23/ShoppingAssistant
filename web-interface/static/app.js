@@ -117,6 +117,7 @@
         });
 
         socket.on('tool_call', (data) => {
+            console.log('[WS] tool_call received:', data);  // DEBUG
             showToolStatus(`Using: ${formatToolName(data.name)}...`);
             if (data.name === 'deep_scrape_urls') {
                 addDeepScrapeProgress(data.args?.urls?.length || 0);
@@ -126,14 +127,28 @@
         });
 
         socket.on('tool_executing', (data) => {
+            console.log('[WS] tool_executing received:', data);  // DEBUG
             showToolStatus(`Running: ${formatToolName(data.name)}...`);
         });
 
         socket.on('tool_progress', (data) => {
+            console.log('[WS] tool_progress received:', data);  // DEBUG
             if (data.total > 0) {
-                showToolStatus(`${formatToolName(data.name)}: ${data.current}/${data.total}...`);
+                // Extract product name from URL for cleaner display
+                let displayInfo = `${data.current}/${data.total}`;
+                if (data.url) {
+                    // Extract product name from Shopee URL or show truncated URL
+                    const urlMatch = data.url.match(/shopee\.co\.id\/([^?]+)/);
+                    if (urlMatch) {
+                        const productPath = decodeURIComponent(urlMatch[1]).replace(/-i\.\d+\.\d+$/, '').replace(/-/g, ' ');
+                        displayInfo = `${data.current}/${data.total}: ${productPath.substring(0, 40)}...`;
+                    } else {
+                        displayInfo = `${data.current}/${data.total}: ${data.url.substring(0, 50)}...`;
+                    }
+                }
+                showToolStatus(`${formatToolName(data.name)}: ${displayInfo}`);
                 if (data.name === 'deep_scrape_urls') {
-                    updateDeepScrapeProgress(data.current, data.total);
+                    updateDeepScrapeProgress(data.current, data.total, data.url);
                 } else {
                     updateToolBadgeTitle(data.name, `${formatToolName(data.name)} (${data.current}/${data.total})`);
                 }
@@ -141,6 +156,7 @@
         });
 
         socket.on('tool_result', (data) => {
+            console.log('[WS] tool_result received:', data);  // DEBUG
             if (data.name === 'deep_scrape_urls') {
                 completeDeepScrapeProgress();
             } else {
@@ -363,7 +379,7 @@
         scrollToBottom();
     }
 
-    function updateDeepScrapeProgress(current, total) {
+    function updateDeepScrapeProgress(current, total, url) {
         const progressDiv = document.getElementById('deep-scrape-progress');
         if (!progressDiv) return;
 
@@ -375,11 +391,34 @@
         const remaining = total - current;
         const progressFill = progressDiv.querySelector('.progress-fill');
         const progressText = progressDiv.querySelector('.progress-text');
+        const urlText = progressDiv.querySelector('.progress-url');
 
         if (progressFill) progressFill.style.width = `${percentage}%`;
         if (progressText) {
             const etaText = formatEta(current, remaining, deepScrapeProgressState.startTime);
             progressText.textContent = `Scraping site ${current}/${total} (${remaining} remaining) • ${etaText}`;
+        }
+
+        // Show current URL being scraped
+        if (url) {
+            if (!urlText) {
+                // Create URL display element if it doesn't exist
+                const urlDiv = document.createElement('div');
+                urlDiv.className = 'progress-url';
+                urlDiv.style.cssText = 'font-size: 11px; color: #9ca3af; margin-top: 4px; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+                progressDiv.appendChild(urlDiv);
+            }
+            const displayUrl = progressDiv.querySelector('.progress-url');
+            if (displayUrl) {
+                // Extract product name from URL for cleaner display
+                const urlMatch = url.match(/shopee\.co\.id\/([^?]+)/);
+                if (urlMatch) {
+                    const productPath = decodeURIComponent(urlMatch[1]).replace(/-i\.\d+\.\d+$/, '').replace(/-/g, ' ');
+                    displayUrl.textContent = `📦 ${productPath.substring(0, 60)}${productPath.length > 60 ? '...' : ''}`;
+                } else {
+                    displayUrl.textContent = `🔗 ${url.substring(0, 70)}...`;
+                }
+            }
         }
     }
 

@@ -815,18 +815,30 @@ const RemoteConnectionManager = {
 
             // Callbacks for streaming
             const onChunk = (chunk) => {
+                console.log('[Remote] onChunk callback:', chunk?.substring?.(0, 30) || chunk);
                 this.emit('ai_stream_chunk', { request_id, chunk });
             };
 
             const onToolCall = (toolName, args) => {
+                console.log('[Remote] onToolCall callback:', toolName, args);
                 this.emit('ai_tool_call', { request_id, name: toolName, args });
             };
 
-            const onProgress = (toolName, current, total) => {
+            const onProgress = (toolName, current, total, url) => {
+                console.log('[Remote] onProgress callback:', toolName, current, total, url);
                 this.emit('ai_tool_executing', { request_id, name: toolName });
+                // Emit progress with current/total and URL for deep scrape
+                this.emit('ai_tool_progress', {
+                    request_id,
+                    name: toolName,
+                    current,
+                    total,
+                    url: url || null  // Include URL being scraped
+                });
             };
 
             const onToolResult = (toolName, success) => {
+                console.log('[Remote] onToolResult callback:', toolName, success);
                 this.emit('ai_tool_result', { request_id, name: toolName, success });
             };
 
