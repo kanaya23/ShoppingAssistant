@@ -798,11 +798,18 @@ const RemoteConnectionManager = {
                 return;
             }
 
-            // Get conversation from ConversationManager
-            let history = ConversationManager.history;
+            // Get conversation from ConversationManager  
+            const conversation = ConversationManager.getOrCreate(tabId);
 
-            // Add user message
+            // Convert to Gemini format (role + parts)
+            const history = conversation.messages.map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : msg.role,
+                parts: msg.parts || [{ text: msg.content || '' }]
+            }));
+
+            // Add user message to history
             history.push({ role: 'user', parts: [{ text }] });
+            ConversationManager.addMessage(tabId, 'user', text);
 
             // Send message through existing Gemini system
             const response = await GeminiAPI.sendMessage(text, history, tabId, (chunk, type) => {
@@ -835,15 +842,12 @@ const RemoteConnectionManager = {
                     );
 
                     if (continuedResponse.text) {
-                        history.push({ role: 'model', parts: [{ text: continuedResponse.text }] });
+                        ConversationManager.addMessage(tabId, 'assistant', continuedResponse.text);
                     }
                 }
             } else if (response.text) {
-                history.push({ role: 'model', parts: [{ text: response.text }] });
+                ConversationManager.addMessage(tabId, 'assistant', response.text);
             }
-
-            // Update conversation history
-            ConversationManager.history = history;
 
             // Signal completion
             this.emit('ai_response_complete', { request_id });
