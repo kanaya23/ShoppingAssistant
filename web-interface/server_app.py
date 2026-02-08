@@ -107,7 +107,10 @@ class ConnectionManager:
             if session_id not in self.conversations:
                 self.conversations[session_id] = {
                     'messages': [],
-                    'processing': False
+                    'processing': False,
+                    'current_response': '',  # Accumulates streaming response
+                    'progress': None,  # Current tool progress state
+                    'last_activity': time.time()
                 }
             return self.conversations[session_id]
     
@@ -119,11 +122,52 @@ class ConnectionManager:
             'parts': parts,
             'timestamp': time.time()
         })
+        conv['last_activity'] = time.time()
+    
+    def append_stream_chunk(self, session_id, chunk):
+        """Accumulate streaming response chunks."""
+        conv = self.get_conversation(session_id)
+        if chunk == '__CLEAR__':
+            conv['current_response'] = ''
+        else:
+            conv['current_response'] += chunk
+        conv['last_activity'] = time.time()
+    
+    def finalize_response(self, session_id):
+        """Save accumulated response as assistant message and clear buffer."""
+        conv = self.get_conversation(session_id)
+        if conv['current_response']:
+            self.add_message(session_id, 'assistant', conv['current_response'])
+            conv['current_response'] = ''
+        conv['processing'] = False
+        conv['progress'] = None
+    
+    def update_progress(self, session_id, tool_name, current, total, url=None):
+        """Update current tool progress state."""
+        conv = self.get_conversation(session_id)
+        conv['progress'] = {
+            'tool': tool_name,
+            'current': current,
+            'total': total,
+            'url': url
+        }
+        conv['last_activity'] = time.time()
+    
+    def clear_progress(self, session_id):
+        """Clear progress state."""
+        conv = self.get_conversation(session_id)
+        conv['progress'] = None
     
     def clear_conversation(self, session_id):
         with self.lock:
             if session_id in self.conversations:
-                self.conversations[session_id]['messages'] = []
+                self.conversations[session_id] = {
+                    'messages': [],
+                    'processing': False,
+                    'current_response': '',
+                    'progress': None,
+                    'last_activity': time.time()
+                }
 
 manager = ConnectionManager()
 
@@ -356,16 +400,34 @@ def handle_register_web(data):
     session_id = data.get('session_id') or str(uuid.uuid4())
     manager.add_web_client(request.sid, session_id)
     
+    # Get conversation and state
+    conv = manager.get_conversation(session_id)
+    
     # Send current state
     emit('registered', {
         'session_id': session_id,
-        'extension_connected': manager.has_extension()
+        'extension_connected': manager.has_extension(),
+        'processing': conv['processing']
     })
     
     # Send conversation history if exists
-    conv = manager.get_conversation(session_id)
     if conv['messages']:
         emit('conversation_history', {'messages': conv['messages']})
+    
+    # Restore processing state if active
+    if conv['processing']:
+        # Send accumulated response so far
+        if conv['current_response']:
+            emit('stream_chunk', {'chunk': conv['current_response']})
+        
+        # Send current tool progress if active
+        if conv['progress']:
+            emit('tool_progress', {
+                'name': conv['progress']['tool'],
+                'current': conv['progress']['current'],
+                'total': conv['progress']['total'],
+                'url': conv['progress']['url']
+            })
     
     print(f'[WS] Web client registered: {session_id}')
 
@@ -477,10 +539,11 @@ def handle_send_message(data):
     # Otherwise use server-side Gemini API
     def stream_callback(event_type, data):
         if event_type == 'chunk':
+            manager.append_stream_chunk(session_id, data)
             socketio.emit('stream_chunk', {'chunk': data}, room=request.sid)
         elif event_type == 'toolCall':
             socketio.emit('tool_call', {'name': data['name'], 'args': data.get('args', {})}, room=request.sid)
-    
+
     try:
         # Call Gemini API
         messages = conv['messages']
@@ -502,6 +565,8 @@ def handle_send_message(data):
             tool_name = tool_call['name']
             tool_args = tool_call.get('args', {})
             
+            # Update progress
+            manager.update_progress(session_id, tool_name, 0, 0)
             emit('tool_executing', {'name': tool_name})
             
             # Execute tool
@@ -667,7 +732,13 @@ def handle_ai_stream_chunk(data):
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            req = pending_ai_requests[request_id]
+            web_sid = req['web_client_sid']
+            session_id = req['session_id']
+            
+            # Store chunk in conversation state
+            manager.append_stream_chunk(session_id, chunk)
+            
             print(f'[WS] Relaying chunk to web client: {web_sid}')  # DEBUG
             socketio.emit('stream_chunk', {'chunk': chunk}, room=web_sid)
         else:
@@ -677,12 +748,19 @@ def handle_ai_stream_chunk(data):
 def handle_ai_tool_call(data):
     """Relay AI tool calls from extension to web client."""
     request_id = data.get('request_id')
+    tool_name = data.get('name')
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            req = pending_ai_requests[request_id]
+            web_sid = req['web_client_sid']
+            session_id = req['session_id']
+            
+            # Update progress state to 'starting tool'
+            manager.update_progress(session_id, tool_name, 0, 0)
+            
             socketio.emit('tool_call', {
-                'name': data.get('name'),
+                'name': tool_name,
                 'args': data.get('args', {})
             }, room=web_sid)
 
@@ -715,18 +793,27 @@ def handle_ai_tool_result(data):
 def handle_ai_tool_progress(data):
     """Relay tool progress (e.g., deep scrape) from extension to web client."""
     request_id = data.get('request_id')
+    tool_name = data.get('name')
+    current = data.get('current')
+    total = data.get('total')
     url = data.get('url')
     
-    print(f'[WS] ai_tool_progress: {data.get("name")} {data.get("current")}/{data.get("total")} - {url[:50] if url else "no url"}')  # DEBUG
+    print(f'[WS] ai_tool_progress: {tool_name} {current}/{total} - {url[:50] if url else "no url"}')  # DEBUG
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            req = pending_ai_requests[request_id]
+            web_sid = req['web_client_sid']
+            session_id = req['session_id']
+            
+            # Store progress state
+            manager.update_progress(session_id, tool_name, current, total, url)
+            
             socketio.emit('tool_progress', {
-                'name': data.get('name'),
-                'current': data.get('current'),
-                'total': data.get('total'),
-                'url': url  # Include URL being scraped
+                'name': tool_name,
+                'current': current,
+                'total': total,
+                'url': url
             }, room=web_sid)
 
 @socketio.on('ai_response_complete')
@@ -736,8 +823,14 @@ def handle_ai_response_complete(data):
     
     with ai_request_lock:
         if request_id in pending_ai_requests:
-            pending_ai_requests[request_id]['result'] = {'success': True}
-            pending_ai_requests[request_id]['completed'] = True
+            req = pending_ai_requests[request_id]
+            session_id = req['session_id']
+            
+            # Finalize response: save to history, clear progress
+            manager.finalize_response(session_id)
+            
+            req['result'] = {'success': True}
+            req['completed'] = True
 
 @socketio.on('ai_response_error')
 def handle_ai_response_error(data):

@@ -80,6 +80,17 @@
 
             document.getElementById('session-id').textContent = sessionId.substring(0, 8) + '...';
             console.log('[WS] Registered with session:', sessionId);
+
+            // Restore processing state if server says so
+            if (data.processing) {
+                console.log('[WS] Restoring processing state...');
+                isStreaming = true;
+                updateInputState(true);
+                // Create a placeholder message if needed (server will send chunks)
+                if (!currentStreamingMessage) {
+                    addMessage('', 'assistant');
+                }
+            }
         });
 
         socket.on('extension_status', (data) => {
@@ -88,6 +99,7 @@
         });
 
         socket.on('conversation_history', (data) => {
+            console.log('[WS] Loading conversation history:', data.messages.length);
             loadConversationHistory(data.messages);
         });
 
@@ -549,6 +561,10 @@
     // CONVERSATION MANAGEMENT
     // ============================================================================
     function loadConversationHistory(messages) {
+        // Clear existing messages to avoid duplicates on reconnect
+        const existingMessages = chatContainer.querySelectorAll('.message, .tool-call-badge, .error-message, .deep-scrape-progress');
+        existingMessages.forEach(m => m.remove());
+
         if (!messages || messages.length === 0) {
             showWelcome();
             return;
@@ -556,10 +572,22 @@
 
         hideWelcome();
         messages.forEach(msg => {
+            // Restore tool calls/badges if present in message parts
+            if (msg.parts) {
+                msg.parts.forEach(part => {
+                    if (part.functionCall) {
+                        addToolBadge(part.functionCall.name, 'complete');
+                    }
+                });
+            }
+
+            // Add text content
             if (msg.content) {
                 addMessage(msg.content, msg.role);
             }
         });
+
+        scrollToBottom();
     }
 
     function clearChat() {
