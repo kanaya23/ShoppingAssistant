@@ -36,6 +36,7 @@
     let currentStreamingMessage = null;
     let tabId = null;
     let singlePickMode = false; // Mode toggle state
+    let deepScrapeProgressState = null;
 
     // Get tabId from URL query param
     function getTabIdFromUrl() {
@@ -220,30 +221,41 @@
 
     // Add a message to the chat
     function addMessage(content, role) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${role}`;
-
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
+        const { messageDiv, contentDiv } = createMessageShell(role);
         contentDiv.innerHTML = formatMarkdown(content);
-
-        messageDiv.appendChild(contentDiv);
         chatContainer.appendChild(messageDiv);
         scrollToBottom();
 
         return messageDiv;
     }
 
+    function createMessageShell(role) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${role}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = `message-avatar ${role}`;
+        avatar.textContent = role === 'assistant' ? 'AI' : 'ME';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
+        bubble.appendChild(contentDiv);
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(bubble);
+
+        return { messageDiv, contentDiv, bubble };
+    }
+
     // Start a streaming message
     function startStreamingMessage() {
         hideWelcome();
 
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message assistant';
+        const { messageDiv, contentDiv } = createMessageShell('assistant');
         messageDiv.id = 'streaming-message';
-
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
 
         // Create separate containers for text and tools
         const textContent = document.createElement('div');
@@ -255,7 +267,6 @@
 
         contentDiv.appendChild(textContent);
         contentDiv.appendChild(toolContent);
-        messageDiv.appendChild(contentDiv);
         chatContainer.appendChild(messageDiv);
         scrollToBottom();
 
@@ -360,6 +371,10 @@
 
     // Add deep scrape progress indicator
     function addDeepScrapeProgress(totalUrls) {
+        deepScrapeProgressState = {
+            startTime: Date.now(),
+            total: totalUrls
+        };
         const progressDiv = document.createElement('div');
         progressDiv.className = 'deep-scrape-progress';
         progressDiv.id = 'deep-scrape-progress';
@@ -394,6 +409,12 @@
     function updateDeepScrapeProgress(current, total) {
         const progressDiv = document.getElementById('deep-scrape-progress');
         if (!progressDiv) return;
+        if (!deepScrapeProgressState) {
+            deepScrapeProgressState = { startTime: Date.now(), total };
+        }
+        if (deepScrapeProgressState.total !== total) {
+            deepScrapeProgressState.total = total;
+        }
 
         const percentage = Math.round((current / total) * 100);
         const remaining = total - current;
@@ -405,7 +426,8 @@
             progressFill.style.width = `${percentage}%`;
         }
         if (progressText) {
-            progressText.textContent = `Scraping site ${current}/${total} (${remaining} remaining)`;
+            const etaText = formatEta(current, remaining, deepScrapeProgressState.startTime);
+            progressText.textContent = `Scraping site ${current}/${total} (${remaining} remaining) • ${etaText}`;
         }
     }
 
@@ -432,6 +454,23 @@
         }
 
         progressDiv.style.borderColor = '#10B981';
+        deepScrapeProgressState = null;
+    }
+
+    function formatEta(current, remaining, startTime) {
+        if (!current || !remaining || !startTime) return 'ETA --';
+        const elapsed = Date.now() - startTime;
+        if (elapsed <= 0) return 'ETA --';
+        const avgPerItem = elapsed / current;
+        const remainingMs = remaining * avgPerItem;
+        if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 'ETA --';
+        const totalSeconds = Math.max(1, Math.round(remainingMs / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        if (minutes > 0) {
+            return `ETA ${minutes}m ${seconds}s`;
+        }
+        return `ETA ${seconds}s`;
     }
     // Add error message
     function addErrorMessage(error) {

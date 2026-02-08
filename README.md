@@ -1,6 +1,6 @@
 # Shopee Shopping Assistant (AI Agent)
 
-![Version](https://img.shields.io/badge/version-1.0.2-blue) ![Platform](https://img.shields.io/badge/platform-Firefox-orange)
+![Version](https://img.shields.io/badge/version-1.0.2-blue) ![Platform](https://img.shields.io/badge/platform-Firefox%20%2B%20Chromium-blue)
 
 A powerful, AI-driven shopping assistant for Shopee Indonesia. This extension transforms your shopping experience by deploying an autonomous AI agent that can search, scrape, analyze, and validate product information using **Gemini AI** and **Serper (Google Search)**.
 
@@ -35,14 +35,20 @@ Tailor the AI's behavior to your needs with a dedicated toggle:
 
 ## 📥 Installation
 
-### Option A: Temporary (Developer Mode)
+### Option A: Chromium (Developer Mode)
+Use this for Chrome, Edge, Brave, or other Chromium-based browsers.
+1.  Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
+2.  Enable **Developer mode**.
+3.  Click **"Load unpacked"** and select this folder.
+
+### Option B: Firefox (Temporary)
 Use this for testing or development.
 1.  Open Firefox and go to `about:debugging`.
 2.  Select **"This Firefox"** in the sidebar.
 3.  Click **"Load Temporary Add-on..."**.
 4.  Navigate to this folder and select `manifest.json`.
 
-### Option B: Permanent Installation
+### Option C: Firefox (Permanent Installation)
 1.  Zip the project files: `zip -r shopee-assistant.xpi *`
 2.  Open Firefox and go to `about:addons`.
 3.  Click the **Settings (gear icon)** ⚙️ → **"Install Add-on From File..."**.

@@ -3,6 +3,15 @@
  * Handles communication between sidebar popup, content scripts, and Gemini API
  */
 
+importScripts(
+    'lib/browser-polyfill.js',
+    'lib/instructions.js',
+    'lib/gemini.js',
+    'lib/gemini-web.js',
+    'lib/deep-scrape-manager.js',
+    'lib/tools.js'
+);
+
 // Connection state management with message queue
 const ConnectionManager = {
     ports: new Map(), // tabId -> port
@@ -125,8 +134,13 @@ async function openSidebarWindow(tabId) {
     // Check if window already exists
     if (existingWindowId) {
         try {
-            await browser.windows.update(existingWindowId, { focused: true });
-            return existingWindowId;
+            try {
+                await browser.windows.update(existingWindowId, { focused: true, alwaysOnTop: true });
+                return existingWindowId;
+            } catch (error) {
+                await browser.windows.update(existingWindowId, { focused: true });
+                return existingWindowId;
+            }
         } catch (e) {
             // Window was closed, create new one
         }
@@ -134,14 +148,31 @@ async function openSidebarWindow(tabId) {
 
     // Create a new popup window
     const sidebarUrl = browser.runtime.getURL(`sidebar/sidebar.html?tabId=${tabId}`);
-    const window = await browser.windows.create({
+    let left;
+    try {
+        const currentWindow = await browser.windows.getCurrent();
+        if (typeof currentWindow.left === 'number' && typeof currentWindow.width === 'number') {
+            left = Math.max(0, currentWindow.left + currentWindow.width - 450);
+        }
+    } catch (error) {
+        console.warn('Unable to determine window position:', error);
+    }
+    const windowOptions = {
         url: sidebarUrl,
         type: 'popup',
         width: 420,
         height: 700,
-        left: screen.width - 450,
         top: 100
-    });
+    };
+    if (typeof left === 'number') {
+        windowOptions.left = left;
+    }
+    const window = await browser.windows.create(windowOptions);
+    try {
+        await browser.windows.update(window.id, { alwaysOnTop: true });
+    } catch (error) {
+        // Ignore if not supported
+    }
 
     ConnectionManager.setSidebarWindow(tabId, window.id);
     ConnectionManager.activeTabId = tabId;
@@ -442,6 +473,10 @@ async function processUserMessage(text, tabId) {
 
         if (settings.apiMode === 'web') {
             // Use Browser Web API - pass progress and result callbacks for tool updates
+            const sidebarWindowId = ConnectionManager.getSidebarWindow(tabId);
+            if (typeof GeminiWebAPI !== 'undefined' && GeminiWebAPI.setContext) {
+                GeminiWebAPI.setContext({ tabId, uiWindowId: sidebarWindowId });
+            }
             response = await GeminiWebAPI.sendMessage(messages, onChunk, onToolCall, onProgress, onToolResult);
             // Web API handles its own tool loop internally and returns finalized text/response
             // But if we want to support the SAME tool loop logic here, we need GeminiWebAPI to return structure?
@@ -541,6 +576,10 @@ async function processUserMessage(text, tabId) {
 
             if (settings.apiMode === 'web') {
                 // Use Browser Web API
+                const sidebarWindowId = ConnectionManager.getSidebarWindow(tabId);
+                if (typeof GeminiWebAPI !== 'undefined' && GeminiWebAPI.setContext) {
+                    GeminiWebAPI.setContext({ tabId, uiWindowId: sidebarWindowId });
+                }
                 response = await GeminiWebAPI.sendMessage(messages, onChunk, onToolCall);
                 // Web API handles its own tool loop internally and returns finalized text/response
                 // But if we want to support the SAME tool loop logic here, we need GeminiWebAPI to return structure?
@@ -575,9 +614,12 @@ async function processUserMessage(text, tabId) {
 }
 
 // Handle browser action click - open popup window
-browser.browserAction.onClicked.addListener(async (tab) => {
-    await openSidebarWindow(tab.id);
-});
+const actionApi = browser.action || browser.browserAction;
+if (actionApi && actionApi.onClicked) {
+    actionApi.onClicked.addListener(async (tab) => {
+        await openSidebarWindow(tab.id);
+    });
+}
 
 // Handle messages from content script (FAB click)
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -598,4 +640,175 @@ browser.windows.onRemoved.addListener((windowId) => {
     }
 });
 
+// ============================================================================
+// REMOTE CONNECTION MANAGER - Azure VM WebSocket Bridge
+// ============================================================================
+
+const RemoteConnectionManager = {
+    socket: null,
+    serverUrl: 'wss://mullion.indonesiacentral.cloudapp.azure.com',
+    isConnected: false,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: Infinity,
+    reconnectDelay: 1000,
+    maxReconnectDelay: 30000,
+
+    async init() {
+        // Load server URL from storage (in case user wants to customize)
+        const { remoteServerUrl } = await browser.storage.local.get('remoteServerUrl');
+        if (remoteServerUrl) {
+            this.serverUrl = remoteServerUrl;
+        }
+        this.connect();
+    },
+
+    connect() {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            return;
+        }
+
+        console.log('[Remote] Connecting to:', this.serverUrl);
+
+        try {
+            // Use Socket.IO client via injected script or native WebSocket
+            // For simplicity, using native WebSocket with Socket.IO protocol
+            const wsUrl = this.serverUrl.replace('wss://', 'wss://').replace('https://', 'wss://');
+            this.socket = new WebSocket(wsUrl + '/socket.io/?EIO=4&transport=websocket');
+
+            this.socket.onopen = () => {
+                console.log('[Remote] WebSocket connected');
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this.reconnectDelay = 1000;
+
+                // Send Socket.IO handshake
+                this.socket.send('40');
+
+                // Register as extension after handshake
+                setTimeout(() => {
+                    this.emit('register_extension', {
+                        tab_id: ConnectionManager.activeTabId
+                    });
+                }, 500);
+            };
+
+            this.socket.onmessage = (event) => {
+                this.handleMessage(event.data);
+            };
+
+            this.socket.onclose = () => {
+                console.log('[Remote] WebSocket closed');
+                this.isConnected = false;
+                this.scheduleReconnect();
+            };
+
+            this.socket.onerror = (error) => {
+                console.error('[Remote] WebSocket error:', error);
+            };
+        } catch (error) {
+            console.error('[Remote] Connection failed:', error);
+            this.scheduleReconnect();
+        }
+    },
+
+    scheduleReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.log('[Remote] Max reconnection attempts reached');
+            return;
+        }
+
+        this.reconnectAttempts++;
+        const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
+
+        console.log(`[Remote] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        setTimeout(() => this.connect(), delay);
+    },
+
+    handleMessage(data) {
+        // Parse Socket.IO protocol
+        if (data === '2') {
+            // Ping - respond with pong
+            this.socket.send('3');
+            return;
+        }
+
+        if (data.startsWith('42')) {
+            // Event message
+            try {
+                const parsed = JSON.parse(data.substring(2));
+                const [eventName, eventData] = parsed;
+                this.handleEvent(eventName, eventData);
+            } catch (e) {
+                console.error('[Remote] Failed to parse message:', e);
+            }
+        }
+    },
+
+    async handleEvent(eventName, data) {
+        console.log('[Remote] Event:', eventName, data);
+
+        switch (eventName) {
+            case 'registered':
+                console.log('[Remote] Registered with server');
+                break;
+
+            case 'execute_tool':
+                await this.executeTool(data);
+                break;
+        }
+    },
+
+    async executeTool(data) {
+        const { request_id, tool_name, args } = data;
+        const tabId = ConnectionManager.activeTabId;
+
+        console.log(`[Remote] Executing tool: ${tool_name}`, args);
+
+        let result;
+        try {
+            result = await ToolExecutor.execute(tool_name, args, tabId, (current, total) => {
+                // Send progress updates to server
+                this.emit('tool_progress', {
+                    request_id,
+                    name: tool_name,
+                    current,
+                    total
+                });
+            });
+        } catch (error) {
+            result = { error: error.message };
+        }
+
+        // Send result back to server
+        this.emit('tool_result', {
+            request_id,
+            result
+        });
+    },
+
+    emit(eventName, data) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            const message = JSON.stringify([eventName, data]);
+            this.socket.send('42' + message);
+        }
+    },
+
+    disconnect() {
+        if (this.socket) {
+            this.socket.close();
+            this.socket = null;
+        }
+        this.isConnected = false;
+    }
+};
+
+// Initialize remote connection when extension loads
+// Delayed to ensure other managers are ready
+setTimeout(() => {
+    RemoteConnectionManager.init().catch(e => {
+        console.error('[Remote] Failed to initialize:', e);
+    });
+}, 2000);
+
 console.log('Shopee Shopping Assistant background script loaded');
+

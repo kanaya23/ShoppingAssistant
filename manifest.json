@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Shopee Shopping Assistant",
   "version": "1.0.2",
   "description": "AI-powered shopping assistant for Shopee Indonesia, featuring Gemini AI with agentic capabilities",
@@ -14,21 +14,19 @@
     "activeTab",
     "storage",
     "tabs",
-    "windows",
+    "windows"
+  ],
+  "host_permissions": [
     "*://*.shopee.co.id/*",
     "*://*.shopee.com/*",
-    "https://gemini.google.com/*"
+    "https://gemini.google.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://google.serper.dev/*",
+    "wss://mullion.indonesiacentral.cloudapp.azure.com/*",
+    "https://mullion.indonesiacentral.cloudapp.azure.com/*"
   ],
   "background": {
-    "scripts": [
-      "lib/instructions.js",
-      "lib/gemini.js",
-      "lib/gemini-web.js",
-      "lib/deep-scrape-manager.js",
-      "lib/tools.js",
-      "background.js"
-    ],
-    "persistent": true
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
@@ -37,6 +35,7 @@
         "*://*.shopee.com/*"
       ],
       "js": [
+        "lib/browser-polyfill.js",
         "lib/deep-scraper.js",
         "content.js"
       ],
@@ -50,12 +49,13 @@
         "https://gemini.google.com/*"
       ],
       "js": [
+        "lib/browser-polyfill.js",
         "lib/gemini-content.js"
       ],
       "run_at": "document_end"
     }
   ],
-  "browser_action": {
+  "action": {
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -64,7 +64,7 @@
     "default_title": "Toggle Shopping Assistant"
   },
   "commands": {
-    "_execute_browser_action": {
+    "_execute_action": {
       "suggested_key": {
         "default": "Alt+Shift+S",
         "mac": "Alt+Shift+S"
@@ -73,7 +73,16 @@
     }
   },
   "web_accessible_resources": [
-    "icons/*",
-    "sidebar/*"
+    {
+      "resources": [
+        "icons/*",
+        "sidebar/*"
+      ],
+      "matches": [
+        "*://*.shopee.co.id/*",
+        "*://*.shopee.com/*",
+        "https://gemini.google.com/*"
+      ]
+    }
   ]
 }

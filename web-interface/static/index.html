@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopping Assistant - Web Interface</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Socket.IO Client -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+
+<body>
+  <div class="assistant-container">
+    <!-- Connection Status -->
+    <div class="connection-status" id="connection-status">
+      <div class="status-dot disconnected"></div>
+      <span class="status-text">Connecting...</span>
+    </div>
+
+    <!-- Header -->
+    <header class="assistant-header">
+      <div class="header-content">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" class="logo-icon">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
+            <path d="M12 15l1.57-3.43L17 10l-3.43-1.57L12 5l-1.57 3.43L7 10l3.43 1.57z" />
+          </svg>
+          <span class="logo-text">Shopping Assistant</span>
+        </div>
+        <div class="header-badge">
+          <span class="badge-web">WEB</span>
+        </div>
+        <div class="header-actions">
+          <button id="fullscreen-btn" class="icon-btn" title="Toggle Fullscreen">
+            <svg viewBox="0 0 24 24">
+              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+            </svg>
+          </button>
+          <button id="clear-btn" class="icon-btn" title="Clear conversation">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" title="Settings">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Chat Container -->
+    <main class="chat-container" id="chat-container">
+      <!-- Welcome Message -->
+      <div class="welcome-message" id="welcome-message">
+        <div class="welcome-icon">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+          </svg>
+        </div>
+        <h2>Welcome to Shopping Assistant</h2>
+        <p>I can help you find the best products on Shopee. Try asking:</p>
+        <div class="suggestions" id="suggestions">
+          <!-- Dynamic suggestions inserted by JS -->
+        </div>
+        <div class="extension-notice" id="extension-notice">
+          <svg viewBox="0 0 24 24">
+            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          </svg>
+          <span>For full Shopee scraping features, connect the browser extension.</span>
+        </div>
+      </div>
+
+      <!-- Messages will be inserted here -->
+    </main>
+
+    <!-- Tool Status Bar -->
+    <div class="tool-status" id="tool-status">
+      <div class="tool-status-content">
+        <div class="spinner"></div>
+        <span id="tool-status-text">Processing...</span>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <footer class="input-area">
+      <div class="mode-toggle-wrapper">
+        <button id="mode-toggle-btn" class="mode-toggle-btn" title="Toggle Single Pick Mode">
+          <span class="mode-icon">🎯</span>
+          <span class="mode-label">Normal</span>
+        </button>
+      </div>
+      <div class="input-wrapper">
+        <textarea id="message-input" placeholder="Ask me to find products..." rows="1"></textarea>
+        <button id="send-btn" class="send-btn" disabled>
+          <svg viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+        <button id="stop-btn" class="stop-btn" style="display: none;">
+          <svg viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+      </div>
+      <div class="input-hint">
+        <span>Press Enter to send, Shift+Enter for new line</span>
+      </div>
+    </footer>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button class="modal-close" id="modal-close">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Connection Status</label>
+            <div class="connection-info">
+              <div class="connection-row">
+                <span>Server:</span>
+                <span id="server-status" class="status-badge connected">Connected</span>
+              </div>
+              <div class="connection-row">
+                <span>Extension:</span>
+                <span id="extension-status" class="status-badge disconnected">Not Connected</span>
+              </div>
+            </div>
+            <p class="form-hint">The browser extension is needed for Shopee scraping features.</p>
+          </div>
+          <div class="form-group">
+            <label>Session</label>
+            <div class="session-info">
+              <code id="session-id">Loading...</code>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <p class="version-info">Shopping Assistant Web v1.0.0</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>
