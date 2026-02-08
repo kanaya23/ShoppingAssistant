@@ -146,7 +146,19 @@ nohup python server_app.py > server.log 2>&1 &
 4. Click **"Load unpacked"**
 5. Select the extension folder
 
-### Step 2: Configure Web Gemini API Mode
+### Step 2: ⚠️ CRITICAL - Trust the Self-Signed Certificate
+
+**Before the extension can connect, you MUST trust the certificate:**
+
+1. In your worker browser (Firefox/Chrome), open a new tab
+2. Go to: `https://mullion.indonesiacentral.cloudapp.azure.com:5000`
+3. You'll see a security warning - click **"Advanced"**
+4. Click **"Accept the Risk and Continue"** (Firefox) or **"Proceed to site"** (Chrome)
+5. You should see the web interface load
+
+> **Why?** Browsers block WebSocket connections to servers with untrusted certificates. By visiting the page first, you tell the browser to trust the certificate.
+
+### Step 3: Configure Web Gemini API Mode
 
 1. Open a Shopee page: `https://shopee.co.id`
 2. Click the extension icon to open sidebar
@@ -162,13 +174,13 @@ nohup python server_app.py > server.log 2>&1 &
 
 5. Click **Save Settings**
 
-### Step 3: Login to Gemini Web
+### Step 4: Login to Gemini Web
 
 1. Open a new tab and go to `https://gemini.google.com`
 2. **Sign in with your Google account**
 3. Keep this tab open (the extension needs it for Web API mode)
 
-### Step 4: Keep Browser Running
+### Step 5: Keep Browser Running
 
 **Important**: The extension must stay running for the web interface to work.
 
@@ -278,6 +290,7 @@ web-interface/
 
 ### Worker PC:
 - [ ] Load extension in Firefox/Chrome
+- [ ] ⚠️ **Visit `https://mullion....:5000` and accept certificate**
 - [ ] Open Shopee tab
 - [ ] Configure extension: API Mode = **Web API**
 - [ ] Login to `gemini.google.com` in another tab

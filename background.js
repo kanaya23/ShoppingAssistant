@@ -646,34 +646,54 @@ browser.windows.onRemoved.addListener((windowId) => {
 
 const RemoteConnectionManager = {
     socket: null,
-    serverUrl: 'wss://mullion.indonesiacentral.cloudapp.azure.com',
+    // Include port 5000 by default
+    serverUrl: 'wss://mullion.indonesiacentral.cloudapp.azure.com:5000',
     isConnected: false,
     reconnectAttempts: 0,
     maxReconnectAttempts: Infinity,
     reconnectDelay: 1000,
     maxReconnectDelay: 30000,
+    enabled: true, // Can be disabled if not using remote feature
 
     async init() {
-        // Load server URL from storage (in case user wants to customize)
-        const { remoteServerUrl } = await browser.storage.local.get('remoteServerUrl');
-        if (remoteServerUrl) {
-            this.serverUrl = remoteServerUrl;
+        // Load settings from storage
+        const settings = await browser.storage.local.get(['remoteServerUrl', 'remoteEnabled']);
+
+        if (settings.remoteServerUrl) {
+            this.serverUrl = settings.remoteServerUrl;
         }
+
+        // Allow disabling remote connection
+        if (settings.remoteEnabled === false) {
+            console.log('[Remote] Remote connection disabled in settings');
+            this.enabled = false;
+            return;
+        }
+
+        console.log('[Remote] Initializing connection to:', this.serverUrl);
         this.connect();
     },
 
     connect() {
+        if (!this.enabled) return;
+
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             return;
         }
 
-        console.log('[Remote] Connecting to:', this.serverUrl);
+        // Ensure we have the correct WebSocket URL format
+        let wsUrl = this.serverUrl;
+        if (wsUrl.startsWith('https://')) {
+            wsUrl = wsUrl.replace('https://', 'wss://');
+        } else if (!wsUrl.startsWith('wss://') && !wsUrl.startsWith('ws://')) {
+            wsUrl = 'wss://' + wsUrl;
+        }
+
+        const fullUrl = wsUrl + '/socket.io/?EIO=4&transport=websocket';
+        console.log('[Remote] Connecting to:', fullUrl);
 
         try {
-            // Use Socket.IO client via injected script or native WebSocket
-            // For simplicity, using native WebSocket with Socket.IO protocol
-            const wsUrl = this.serverUrl.replace('wss://', 'wss://').replace('https://', 'wss://');
-            this.socket = new WebSocket(wsUrl + '/socket.io/?EIO=4&transport=websocket');
+            this.socket = new WebSocket(fullUrl);
 
             this.socket.onopen = () => {
                 console.log('[Remote] WebSocket connected');
