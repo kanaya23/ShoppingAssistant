@@ -400,6 +400,29 @@ def handle_send_message(data):
     # Start streaming
     emit('stream_start')
     
+    # Check if we should route through extension (no API key configured)
+    use_extension_ai = not config.GEMINI_API_KEY
+    
+    if use_extension_ai:
+        # Route entire conversation through extension's Web Gemini API
+        if not manager.has_extension():
+            emit('error', {'message': 'No extension connected. Please open the browser extension on your worker PC.'})
+            conv['processing'] = False
+            emit('stream_end')
+            return
+        
+        try:
+            result = route_message_via_extension(text, session_id, request.sid)
+            if result.get('error'):
+                emit('error', {'message': result['error']})
+        except Exception as e:
+            emit('error', {'message': str(e)})
+        finally:
+            conv['processing'] = False
+            emit('stream_end')
+        return
+    
+    # Otherwise use server-side Gemini API
     def stream_callback(event_type, data):
         if event_type == 'chunk':
             socketio.emit('stream_chunk', {'chunk': data}, room=request.sid)
@@ -536,6 +559,121 @@ def handle_tool_progress(data):
     for sid, info in manager.web_clients.items():
         if info['session_id'] == session_id:
             socketio.emit('tool_progress', data, room=sid)
+
+# Extension AI routing (for Web Gemini API mode)
+pending_ai_requests = {}
+ai_request_lock = Lock()
+
+def route_message_via_extension(text, session_id, web_client_sid):
+    """Route user message to extension for AI processing via Web Gemini API."""
+    ext_sid = manager.get_active_extension()
+    if not ext_sid:
+        return {'error': 'No extension connected'}
+    
+    request_id = str(uuid.uuid4())
+    
+    # Store pending request
+    with ai_request_lock:
+        pending_ai_requests[request_id] = {
+            'session_id': session_id,
+            'web_client_sid': web_client_sid,
+            'result': None,
+            'completed': False
+        }
+    
+    # Send to extension
+    socketio.emit('process_ai_message', {
+        'request_id': request_id,
+        'session_id': session_id,
+        'text': text
+    }, room=ext_sid)
+    
+    # Wait for completion (max 300 seconds for long AI responses)
+    start = time.time()
+    while time.time() - start < 300:
+        with ai_request_lock:
+            if pending_ai_requests.get(request_id, {}).get('completed'):
+                result = pending_ai_requests[request_id]['result']
+                del pending_ai_requests[request_id]
+                return result
+        time.sleep(0.5)
+    
+    # Timeout
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            del pending_ai_requests[request_id]
+    
+    return {'error': 'AI request timeout'}
+
+@socketio.on('ai_stream_chunk')
+def handle_ai_stream_chunk(data):
+    """Relay AI stream chunks from extension to web client."""
+    request_id = data.get('request_id')
+    chunk = data.get('chunk', '')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('stream_chunk', {'chunk': chunk}, room=web_sid)
+
+@socketio.on('ai_tool_call')
+def handle_ai_tool_call(data):
+    """Relay AI tool calls from extension to web client."""
+    request_id = data.get('request_id')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('tool_call', {
+                'name': data.get('name'),
+                'args': data.get('args', {})
+            }, room=web_sid)
+
+@socketio.on('ai_tool_executing')
+def handle_ai_tool_executing(data):
+    """Relay tool execution status from extension to web client."""
+    request_id = data.get('request_id')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('tool_executing', {'name': data.get('name')}, room=web_sid)
+
+@socketio.on('ai_tool_result')
+def handle_ai_tool_result(data):
+    """Relay tool results from extension to web client."""
+    request_id = data.get('request_id')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('tool_result', {
+                'name': data.get('name'),
+                'success': data.get('success', False)
+            }, room=web_sid)
+
+@socketio.on('ai_response_complete')
+def handle_ai_response_complete(data):
+    """Handle completed AI response from extension."""
+    request_id = data.get('request_id')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            pending_ai_requests[request_id]['result'] = {'success': True}
+            pending_ai_requests[request_id]['completed'] = True
+
+@socketio.on('ai_response_error')
+def handle_ai_response_error(data):
+    """Handle AI error from extension."""
+    request_id = data.get('request_id')
+    error = data.get('error', 'Unknown error')
+    
+    with ai_request_lock:
+        if request_id in pending_ai_requests:
+            web_sid = pending_ai_requests[request_id]['web_client_sid']
+            socketio.emit('error', {'message': error}, room=web_sid)
+            pending_ai_requests[request_id]['result'] = {'error': error}
+            pending_ai_requests[request_id]['completed'] = True
 
 # ============================================================================
 # HTTP ROUTES

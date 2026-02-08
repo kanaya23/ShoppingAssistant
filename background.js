@@ -775,6 +775,85 @@ const RemoteConnectionManager = {
             case 'execute_tool':
                 await this.executeTool(data);
                 break;
+
+            case 'process_ai_message':
+                // Route AI message through extension's conversation system
+                await this.processAIMessage(data);
+                break;
+        }
+    },
+
+    async processAIMessage(data) {
+        const { request_id, session_id, text } = data;
+        console.log('[Remote] Processing AI message:', text);
+
+        try {
+            // Get active tab
+            const tabId = ConnectionManager.activeTabId;
+            if (!tabId) {
+                this.emit('ai_response_error', {
+                    request_id,
+                    error: 'No active Shopee tab. Please open Shopee in the browser.'
+                });
+                return;
+            }
+
+            // Get conversation from ConversationManager
+            let history = ConversationManager.history;
+
+            // Add user message
+            history.push({ role: 'user', parts: [{ text }] });
+
+            // Send message through existing Gemini system
+            const response = await GeminiAPI.sendMessage(text, history, tabId, (chunk, type) => {
+                // Stream callback - relay to server
+                if (type === 'chunk' || !type) {
+                    this.emit('ai_stream_chunk', { request_id, chunk });
+                } else if (type === 'toolCall') {
+                    this.emit('ai_tool_call', { request_id, name: chunk.name, args: chunk.args });
+                }
+            });
+
+            // Handle tool calls if any
+            if (response.toolCalls && response.toolCalls.length > 0) {
+                for (const toolCall of response.toolCalls) {
+                    this.emit('ai_tool_executing', { request_id, name: toolCall.name });
+
+                    // Execute tool
+                    const result = await ToolExecutor.execute(toolCall.name, toolCall.args, tabId);
+
+                    this.emit('ai_tool_result', {
+                        request_id,
+                        name: toolCall.name,
+                        success: !result.error
+                    });
+
+                    // Continue conversation with tool result
+                    const continuedResponse = await GeminiAPI.continueWithToolResult(
+                        toolCall, result, history, tabId,
+                        (chunk) => this.emit('ai_stream_chunk', { request_id, chunk })
+                    );
+
+                    if (continuedResponse.text) {
+                        history.push({ role: 'model', parts: [{ text: continuedResponse.text }] });
+                    }
+                }
+            } else if (response.text) {
+                history.push({ role: 'model', parts: [{ text: response.text }] });
+            }
+
+            // Update conversation history
+            ConversationManager.history = history;
+
+            // Signal completion
+            this.emit('ai_response_complete', { request_id });
+
+        } catch (error) {
+            console.error('[Remote] AI processing error:', error);
+            this.emit('ai_response_error', {
+                request_id,
+                error: error.message || 'Failed to process AI message'
+            });
         }
     },
 
