@@ -801,51 +801,39 @@ const RemoteConnectionManager = {
             // Get conversation from ConversationManager  
             const conversation = ConversationManager.getOrCreate(tabId);
 
-            // Convert to Gemini format (role + parts)
-            const history = conversation.messages.map(msg => ({
-                role: msg.role === 'assistant' ? 'model' : msg.role,
-                parts: msg.parts || [{ text: msg.content || '' }]
-            }));
-
-            // Add user message to history
-            history.push({ role: 'user', parts: [{ text }] });
+            // Add user message
             ConversationManager.addMessage(tabId, 'user', text);
 
-            // Send message through existing Gemini system
-            const response = await GeminiAPI.sendMessage(text, history, tabId, (chunk, type) => {
-                // Stream callback - relay to server
-                if (type === 'chunk' || !type) {
-                    this.emit('ai_stream_chunk', { request_id, chunk });
-                } else if (type === 'toolCall') {
-                    this.emit('ai_tool_call', { request_id, name: chunk.name, args: chunk.args });
-                }
-            });
+            // Get messages for GeminiWebAPI
+            const messages = ConversationManager.getMessages(tabId);
 
-            // Handle tool calls if any
-            if (response.toolCalls && response.toolCalls.length > 0) {
-                for (const toolCall of response.toolCalls) {
-                    this.emit('ai_tool_executing', { request_id, name: toolCall.name });
+            // Callbacks for streaming
+            const onChunk = (chunk) => {
+                this.emit('ai_stream_chunk', { request_id, chunk });
+            };
 
-                    // Execute tool
-                    const result = await ToolExecutor.execute(toolCall.name, toolCall.args, tabId);
+            const onToolCall = (toolName, args) => {
+                this.emit('ai_tool_call', { request_id, name: toolName, args });
+            };
 
-                    this.emit('ai_tool_result', {
-                        request_id,
-                        name: toolCall.name,
-                        success: !result.error
-                    });
+            const onProgress = (toolName, current, total) => {
+                this.emit('ai_tool_executing', { request_id, name: toolName });
+            };
 
-                    // Continue conversation with tool result
-                    const continuedResponse = await GeminiAPI.continueWithToolResult(
-                        toolCall, result, history, tabId,
-                        (chunk) => this.emit('ai_stream_chunk', { request_id, chunk })
-                    );
+            const onToolResult = (toolName, success) => {
+                this.emit('ai_tool_result', { request_id, name: toolName, success });
+            };
 
-                    if (continuedResponse.text) {
-                        ConversationManager.addMessage(tabId, 'assistant', continuedResponse.text);
-                    }
-                }
-            } else if (response.text) {
+            // Set context for GeminiWebAPI
+            if (typeof GeminiWebAPI !== 'undefined' && GeminiWebAPI.setContext) {
+                GeminiWebAPI.setContext({ tabId, uiWindowId: null });
+            }
+
+            // Use GeminiWebAPI - handles tool loops internally, uses gemini.google.com (no API key!)
+            const response = await GeminiWebAPI.sendMessage(messages, onChunk, onToolCall, onProgress, onToolResult);
+
+            // Save assistant response
+            if (response && response.text) {
                 ConversationManager.addMessage(tabId, 'assistant', response.text);
             }
 
