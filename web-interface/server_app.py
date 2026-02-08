@@ -602,23 +602,41 @@ if __name__ == '__main__':
     print(f'  SSL:       {config.USE_SSL}')
     print('=' * 60)
     
-    ssl_context = None
     if config.USE_SSL:
         try:
+            import eventlet
+            import eventlet.wsgi
+            
             cert_path, key_path = generate_self_signed_cert()
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            ssl_context.load_cert_chain(cert_path, key_path)
             print(f'[Server] SSL enabled with self-signed certificate')
+            
+            # Create SSL-wrapped socket for eventlet
+            listener = eventlet.listen((config.HOST, config.PORT))
+            ssl_listener = eventlet.wrap_ssl(
+                listener,
+                certfile=cert_path,
+                keyfile=key_path,
+                server_side=True
+            )
+            
+            print(f'[Server] Starting HTTPS server on https://{config.HOST}:{config.PORT}')
+            eventlet.wsgi.server(ssl_listener, app)
+            
         except Exception as e:
             print(f'[Server] SSL setup failed: {e}')
             print('[Server] Falling back to HTTP')
-            ssl_context = None
-    
-    # Start the server
-    socketio.run(
-        app,
-        host=config.HOST,
-        port=config.PORT,
-        debug=config.DEBUG,
-        ssl_context=ssl_context
-    )
+            socketio.run(
+                app,
+                host=config.HOST,
+                port=config.PORT,
+                debug=config.DEBUG
+            )
+    else:
+        print(f'[Server] Starting HTTP server on http://{config.HOST}:{config.PORT}')
+        socketio.run(
+            app,
+            host=config.HOST,
+            port=config.PORT,
+            debug=config.DEBUG
+        )
+
